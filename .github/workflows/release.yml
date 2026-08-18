@@ -1,0 +1,188 @@
+name: Release
+
+# Builds the reproducible zip and publishes it as a GitHub Release with its
+# SHA256SUMS.txt. Hosted runners, as in ci.yml.
+#
+# Dispatch it after bumping manifest.json's version and adding the matching
+# CHANGELOG.md heading:
+#   gh workflow run release.yml -f version=X.Y.Z
+# The version input is a guard, not the source of truth: it must equal
+# manifest.json's version, so a mistyped dispatch fails instead of shipping the
+# wrong number.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (must equal manifest.json version), e.g. 0.7.0'
+        required: true
+      publish:
+        # A string choice, not a boolean: `<all_urls>` review takes days, so the
+        # default is to upload a DRAFT and never block the release on it.
+        description: 'Submit to the Chrome Web Store for review after uploading (uploading alone is safe).'
+        type: choice
+        default: 'false'
+        options: ['false', 'true']
+
+permissions:
+  contents: write # create the release and upload assets
+
+concurrency:
+  # The store rejects a second upload of the same version, and two concurrent
+  # releases would race for which one is the draft.
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check inputs against the manifest and changelog
+        run: |
+          MANIFEST=$(node -p "require('./manifest.json').version")
+          if [ "${{ inputs.version }}" != "$MANIFEST" ]; then
+            echo "::error::input version ${{ inputs.version }} != manifest.json version $MANIFEST"
+            exit 1
+          fi
+          if ! grep -q "## v${MANIFEST} " CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## v${MANIFEST}' heading"
+            exit 1
+          fi
+          if git rev-parse "v${MANIFEST}" >/dev/null 2>&1; then
+            echo "::error::tag v${MANIFEST} already exists - bump the version"
+            exit 1
+          fi
+
+      - name: Audit
+        run: node scripts/audit.mjs
+
+      - name: Build
+        run: node scripts/build.mjs
+
+      - name: Tag
+        run: |
+          git config user.name "Sanghwa Na"
+          git config user.email "sanghwa.me@gmail.com"
+          git tag -a "v${{ inputs.version }}" -m "Release v${{ inputs.version }}"
+          git push origin "v${{ inputs.version }}"
+
+      # Body: the changelog section for this version, plus the verification
+      # instructions so they sit right next to the download.
+      - name: Assemble release notes
+        run: |
+          {
+            awk '/^## v${{ inputs.version }} /{f=1;print;next} /^## v/{if(f)exit} f' CHANGELOG.md
+            echo ""
+            echo "## Verify the download"
+            echo ""
+            echo '```sh'
+            echo "shasum -a 256 -c SHA256SUMS.txt"
+            echo '```'
+            echo ""
+            echo "Or rebuild it yourself and compare - the zip is byte-reproducible:"
+            echo ""
+            echo '```sh'
+            echo "git checkout v${{ inputs.version }} && node scripts/build.mjs"
+            echo "shasum -a 256 dist/foxl-browser-extension-${{ inputs.version }}.zip"
+            echo '```'
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ inputs.version }}" \
+            --title "v${{ inputs.version }}" \
+            --notes-file release-notes.md \
+            "dist/foxl-browser-extension-${{ inputs.version }}.zip" \
+            "dist/foxl-browser-extension-latest.zip" \
+            "dist/SHA256SUMS.txt"
+
+      # THE STORE UPLOAD. Plain curl against the Chrome Web Store API - two requests,
+      # and a dependency that can publish to the store is a supply-chain surface this
+      # repo does not need. It SKIPS LOUDLY when the secrets are absent (the state
+      # until the developer account exists), naming the missing secret in the summary,
+      # because a skipped step that reads as success is how a channel goes stale
+      # unnoticed. Uploading is not publishing: `publish=false` leaves a DRAFT in the
+      # dashboard, since <all_urls> review takes days and must never block a release.
+      - name: Upload to the Chrome Web Store
+        id: cws
+        env:
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          CWS_EXTENSION_ID: ${{ secrets.CWS_EXTENSION_ID }}
+          ZIP: dist/foxl-browser-extension-${{ inputs.version }}.zip
+        run: |
+          set -uo pipefail
+          missing=""
+          for k in CWS_CLIENT_ID CWS_CLIENT_SECRET CWS_REFRESH_TOKEN CWS_EXTENSION_ID; do
+            eval "v=\${$k:-}"
+            [ -n "$v" ] || missing="$missing $k"
+          done
+          if [ -n "$missing" ]; then
+            echo "uploaded=skipped" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Chrome Web Store upload SKIPPED"
+              echo ""
+              echo "Missing secret(s):$missing"
+              echo ""
+              echo "The zip is attached to the GitHub release and can be uploaded by hand at"
+              echo "https://chrome.google.com/webstore/devconsole. Registering the developer"
+              echo "account is a one-time \$5 fee; see STORE-LISTING.md for the listing text,"
+              echo "the per-permission justifications and the data-use disclosure."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::store upload skipped - missing:$missing"
+            exit 0
+          fi
+
+          token="$(curl -sS -X POST https://oauth2.googleapis.com/token \
+            -d "client_id=$CWS_CLIENT_ID" \
+            -d "client_secret=$CWS_CLIENT_SECRET" \
+            -d "refresh_token=$CWS_REFRESH_TOKEN" \
+            -d 'grant_type=refresh_token' | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).access_token||"")}catch{}})')"
+          if [ -z "$token" ]; then
+            echo "::error::could not exchange CWS_REFRESH_TOKEN for an access token"
+            exit 1
+          fi
+
+          up="$(curl -sS -X PUT \
+            -H "Authorization: Bearer $token" \
+            -H 'x-goog-api-version: 2' \
+            -T "$ZIP" \
+            "https://www.googleapis.com/upload/chromewebstore/v1.1/items/$CWS_EXTENSION_ID")"
+          echo "upload response: $up"
+          state="$(printf '%s' "$up" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);process.stdout.write(j.uploadState||"")}catch{}})')"
+          if [ "$state" != "SUCCESS" ]; then
+            echo "::error::store upload state=$state (see the response above; ITEM_NOT_UPDATABLE usually means this version was already uploaded - the store accepts a version only once)"
+            exit 1
+          fi
+          echo "uploaded=success" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ inputs.publish }}" = "true" ]; then
+            pub="$(curl -sS -X POST -H "Authorization: Bearer $token" -H 'Content-Length: 0' \
+              "https://www.googleapis.com/chromewebstore/v1.1/items/$CWS_EXTENSION_ID/publish")"
+            echo "publish response: $pub"
+          else
+            echo "uploaded as a DRAFT (publish input was false) - submit from the dashboard when the listing is ready."
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### release ${{ inputs.version }}"
+            echo ""
+            echo "| step | result |"
+            echo "|---|---|"
+            echo "| github release | ${{ job.status }} |"
+            echo "| store upload | ${{ steps.cws.outputs.uploaded || 'not reached' }} |"
+            echo "| submitted for review | ${{ inputs.publish }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

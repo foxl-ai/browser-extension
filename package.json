@@ -1,0 +1,18 @@
+{
+  "name": "foxl-browser-extension",
+  "private": true,
+  "description": "Foxl browser extension - lets the Foxl agent act in your real Chrome tabs",
+  "homepage": "https://github.com/foxl-ai/browser-extension",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "icons": "node scripts/generate-icons.mjs"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

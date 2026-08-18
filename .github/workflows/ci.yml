@@ -1,0 +1,60 @@
+name: CI
+
+# Runs on GitHub-hosted runners, which are free for a public repository. These jobs
+# assume that: they will not run in a repository that has no runner available to it,
+# so do not copy this file somewhere that lacks one and expect the gate to hold.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # The audit is the gate that keeps the README's trust claims honest:
+      # every declared permission is used, nothing calls a non-local host, no
+      # remotely hosted code. It has zero dependencies, so there is nothing to
+      # install first.
+      - name: Audit permissions and network surface
+        run: node scripts/audit.mjs
+
+      # Build the release zip and prove it is reproducible: build twice and
+      # require identical bytes. A drift here means the "rebuild at the tag and
+      # compare digests" instruction in the README would fail for an honest
+      # user, which would read as tampering.
+      - name: Build (reproducible)
+        run: |
+          node scripts/build.mjs
+          shasum -a 256 dist/foxl-browser-extension-*.zip | sort -u > /tmp/first.txt
+          node scripts/build.mjs
+          shasum -a 256 dist/foxl-browser-extension-*.zip | sort -u > /tmp/second.txt
+          if ! diff -u /tmp/first.txt /tmp/second.txt; then
+            echo "::error::build is not reproducible - two builds produced different bytes"
+            exit 1
+          fi
+          echo "reproducible:"
+          cat dist/SHA256SUMS.txt
+
+      # A quick sanity check that the manifest version and the top CHANGELOG
+      # heading agree, so a release cannot ship a version the changelog does not
+      # mention.
+      - name: Version matches changelog
+        run: |
+          VERSION=$(node -p "require('./manifest.json').version")
+          if ! grep -q "## v${VERSION} " CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## v${VERSION}' heading"
+            exit 1
+          fi
+          echo "manifest and changelog agree on v${VERSION}"

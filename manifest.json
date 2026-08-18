@@ -1,0 +1,68 @@
+{
+  "manifest_version": 3,
+  "name": "Foxl",
+  "version": "0.7.0",
+  "description": "AI agent for browser automation - reads pages, clicks, types, and navigates on your behalf",
+  "homepage_url": "https://github.com/foxl-ai/browser-extension",
+  "action": {
+    "default_title": "Open Foxl"
+  },
+  "background": {
+    "service_worker": "src/service-worker.js",
+    "type": "module"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+F",
+        "mac": "Command+Shift+F"
+      },
+      "description": "Open Foxl side panel"
+    }
+  },
+  "content_scripts": [
+    {
+      "js": ["src/content-scripts/accessibility-tree.js"],
+      "matches": ["<all_urls>"],
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "js": ["src/content-scripts/visual-indicator.js"],
+      "matches": ["<all_urls>"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "options_page": "options.html",
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "scripting",
+    "tabs",
+    "tabGroups",
+    "alarms"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/content-scripts/accessibility-tree.js",
+        "src/content-scripts/visual-indicator.js"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "minimum_chrome_version": "116"
+}

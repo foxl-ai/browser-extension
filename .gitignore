@@ -1,0 +1,19 @@
+node_modules/
+dist/
+
+# Not committed on purpose. The one devDependency (@resvg/resvg-js) is used only
+# by scripts/generate-icons.mjs, which a maintainer runs by hand when the brand
+# mark changes; the committed PNGs are the artifact. scripts/build.mjs - the only
+# thing that produces a release - has zero dependencies and never reads this
+# file, so a lockfile could not affect what ships.
+package-lock.json
+
+# Local agent instructions, deliberately not published. CLAUDE.md is the maintainer's
+# working notes for this repository, not something this repository promises its
+# readers - those promises are README.md, SECURITY.md and PRIVACY.md, and
+# scripts/audit.mjs is what keeps them true. Claude Code reads it from disk rather
+# than from git, so ignoring it costs nothing. Do not re-add it.
+CLAUDE.md
+
+# macOS
+.DS_Store

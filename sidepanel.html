@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Foxl</title>
+  <link rel="stylesheet" href="styles/sidepanel.css">
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">
+      <div class="status-dot" id="statusDot" title="Disconnected"></div>
+      <span class="model-label" id="modelLabel"></span>
+    </div>
+    <div class="header-right">
+      <button class="icon-button" id="settingsBtn" title="Settings">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="tab-bar" id="tabBar" style="display:none">
+    <div class="tab-bar-inner" id="tabBarInner"></div>
+  </div>
+
+  <!--
+    THE SCREEN SOMEBODY WHO INSTALLED THIS FROM A STORE ACTUALLY SEES.
+
+    Until this existed, the entire failure UI was four console.error calls and a grey
+    dot whose `title` said "Disconnected" - and most people who install a browser
+    extension from a store do NOT have Foxl Desktop, because the extension talks only
+    to a local websocket on 13847/3847. So the default first-run experience was a
+    chat box that silently did nothing, which is both the 1-star review and the store
+    rejection, from one cause.
+  -->
+  <div class="setup-state" id="setupState" style="display:none">
+    <div class="setup-icon">
+      <img src="icons/icon.svg" alt="Foxl" width="40" height="40">
+    </div>
+    <h2 class="setup-title" id="setupTitle">Foxl Desktop is required</h2>
+    <p class="setup-body" id="setupBody">
+      This extension is the browser half of Foxl. It connects to the Foxl Desktop app
+      running on this computer - nothing is sent to a Foxl server from here.
+    </p>
+    <a class="setup-cta" id="setupCta" href="https://foxl.ai" target="_blank" rel="noreferrer">Get Foxl Desktop</a>
+    <!--
+      The RECONNECTING state's escape hatch. It is a quiet link rather than the CTA
+      above because "your desktop is asleep" and "you removed your desktop" cannot be
+      told apart from here, and shouting the download at somebody whose app is merely
+      closed reads as "your install is broken". Without it, a person who uninstalled
+      the desktop has no route back to this panel's install screen at all.
+    -->
+    <a class="setup-link" id="setupGone" href="https://foxl.ai" target="_blank" rel="noreferrer" style="display:none">Removed Foxl Desktop? Install it again</a>
+    <button class="setup-link" id="setupRetry">Retry connection</button>
+    <button class="setup-link" id="setupSettings">Set a custom port</button>
+  </div>
+
+  <div class="messages" id="messages">
+    <div class="empty-state">
+      <div class="empty-state-icon">
+        <img src="icons/icon.svg" alt="Foxl" width="48" height="48">
+      </div>
+      <p>Ask anything or automate browser tasks.</p>
+    </div>
+  </div>
+
+  <div class="input-container">
+    <div class="input-wrapper">
+      <textarea
+        class="input-field"
+        id="inputField"
+        placeholder="Message Foxl..."
+        rows="1"
+        autocomplete="off"
+      ></textarea>
+      <button class="send-button" id="sendButton" title="Send">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <script src="src/sidepanel.js"></script>
+</body>
+</html>

@@ -1,0 +1,343 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #ffffff;
+  --fg: #09090b;
+  --muted: #f4f4f5;
+  --muted-fg: #71717a;
+  --border: #e4e4e7;
+  --accent: #f4f4f5;
+  --primary: #09090b;
+  --primary-fg: #fafafa;
+  --radius: 8px;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Header */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  min-height: 36px;
+}
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.header-logo {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+}
+.header-title {
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: -0.02em;
+}
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted-fg);
+  transition: background 0.2s;
+}
+.status-dot.connected {
+  background: #22c55e;
+}
+.model-label {
+  font-size: 10px;
+  color: var(--muted-fg);
+  font-family: ui-monospace, monospace;
+}
+.icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--muted-fg);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.icon-button:hover {
+  background: var(--accent);
+  color: var(--fg);
+}
+
+/* Tab bar */
+.tab-bar {
+  border-bottom: 1px solid var(--border);
+  padding: 4px 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tab-bar::-webkit-scrollbar { display: none; }
+.tab-bar-inner {
+  display: flex;
+  gap: 4px;
+  min-width: max-content;
+}
+.tab-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: var(--muted);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--muted-fg);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.tab-chip:hover {
+  background: var(--accent);
+  color: var(--fg);
+}
+.tab-chip.focused {
+  border-color: #22c55e;
+  color: var(--fg);
+}
+.tab-chip-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--muted-fg);
+  flex-shrink: 0;
+}
+.tab-chip.focused .tab-chip-dot {
+  background: #22c55e;
+}
+
+/* Messages */
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.messages::-webkit-scrollbar { width: 3px; }
+.messages::-webkit-scrollbar-track { background: transparent; }
+.messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+.message {
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  line-height: 1.6;
+  max-width: 90%;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+}
+.message.user {
+  background: var(--primary);
+  color: var(--primary-fg);
+  align-self: flex-end;
+  border-radius: var(--radius) var(--radius) 4px var(--radius);
+}
+.message.assistant {
+  background: var(--muted);
+  color: var(--fg);
+  align-self: flex-start;
+  border-radius: var(--radius) var(--radius) var(--radius) 4px;
+}
+.message.assistant.streaming {
+  border-left: 2px solid var(--muted-fg);
+}
+.message.system {
+  background: transparent;
+  color: var(--muted-fg);
+  font-size: 11px;
+  align-self: center;
+  text-align: center;
+  padding: 4px 10px;
+}
+.message.tool {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted-fg);
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  align-self: flex-start;
+  padding: 6px 10px;
+}
+
+/* Input */
+.input-container {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+.input-wrapper {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+}
+.input-field {
+  flex: 1;
+  padding: 8px 12px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+  font-family: inherit;
+  resize: none;
+  max-height: 120px;
+  line-height: 1.5;
+}
+.input-field:focus {
+  border-color: #52525b;
+}
+.input-field::placeholder {
+  color: var(--muted-fg);
+}
+.send-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  background: var(--primary);
+  color: var(--primary-fg);
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+.send-button:hover { opacity: 0.9; }
+.send-button:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* Loading */
+.loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  color: var(--muted-fg);
+  font-size: 11px;
+}
+.loading-dots { display: flex; gap: 3px; }
+.loading-dots span {
+  width: 4px; height: 4px;
+  background: var(--muted-fg);
+  border-radius: 50%;
+  animation: pulse 1.4s infinite ease-in-out both;
+}
+.loading-dots span:nth-child(1) { animation-delay: -0.32s; }
+.loading-dots span:nth-child(2) { animation-delay: -0.16s; }
+@keyframes pulse {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1); }
+}
+
+/* Empty state */
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 24px;
+  text-align: center;
+  gap: 10px;
+}
+.empty-state-icon { margin-bottom: 4px; }
+.empty-state-icon img { width: 36px; height: 36px; border-radius: 8px; }
+.empty-state p {
+  font-size: 12px;
+  color: var(--muted-fg);
+  line-height: 1.5;
+  max-width: 200px;
+}
+
+/* ── The pre-connection states (see the comment in sidepanel.html) ─────────── */
+
+.setup-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 22px;
+  text-align: center;
+}
+
+.setup-icon { opacity: 0.9; }
+
+.setup-title {
+  margin: 4px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.setup-body {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  opacity: 0.72;
+  max-width: 34ch;
+}
+
+.setup-cta {
+  margin-top: 6px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  text-decoration: none;
+  background: currentColor;
+  /* `color` is inverted by the two lines below so this reads on either theme
+     without hardcoding a palette the rest of this file does not define. */
+  color: canvas;
+  filter: none;
+}
+
+.setup-link {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  font: inherit;
+  font-size: 12px;
+  opacity: 0.62;
+  cursor: pointer;
+  text-decoration: underline;
+  color: inherit;
+}
+
+.setup-link:hover { opacity: 0.9; }
+
+/* A composer that cannot send must not look like one that can. */
+.input-container.is-disabled { opacity: 0.5; pointer-events: none; }
