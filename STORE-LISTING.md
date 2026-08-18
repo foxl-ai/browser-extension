@@ -52,13 +52,33 @@ Where your data goes
   and it sends nothing anywhere except to Foxl Desktop on your own machine.
 
 Source code: https://github.com/foxl-ai/browser-extension
-Privacy policy: https://foxl.ai/privacy
+Privacy: https://github.com/foxl-ai/browser-extension/blob/main/PRIVACY.md
 ```
 
 The "no analytics" sentence must stay consistent with foxl.ai's privacy page, which
 states that the Foxl APPS carry no analytics SDK (foxl.ai and docs.foxl.ai use GA4
 behind consent - that is the website, not an app). Do not write a stronger claim here
 than that page makes.
+
+### The privacy policy URL is PRIVACY.md, not foxl.ai/privacy
+
+This used to say `https://foxl.ai/privacy`, and submitting that URL was a live
+rejection risk. That page covers Foxl Agent, Foxl Code and Foxl Notes across desktop,
+web and mobile, and as of 2026-08-18 it does not mention a browser extension, page
+content or website content anywhere. The form immediately below discloses that this
+item collects **website content**, so the listing would have asserted a collection
+that its own linked policy did not cover. A reviewer compares those two, and
+`<all_urls>` already puts this item in the slow, closely-read lane.
+
+`PRIVACY.md` is the right link instead, and not merely as a stopgap: it names the
+extension in its first line, states the website-content collection outright in a
+per-item table, and carries a "Chrome Web Store disclosure" section that answers the
+dashboard's nine data categories and its three certifications in the store's own
+words, so the form and the policy can be diffed line by line.
+
+The better end state is still an extension section on foxl.ai/privacy, and
+`PRIVACY.md` is close to the text it needs. That is a website deploy, so it must not
+block a submission; switch this URL back once that section exists.
 
 ## Permission justifications (one per permission, with its call site)
 
@@ -102,7 +122,8 @@ Certifications, all three of which are true of this code:
 - Screenshots: 1280x800 (or 640x400), at least one. Show the side panel next to a
   real page, and show the "Foxl Desktop is required" state - a reviewer will hit it.
 - Small promo tile 440x280 (optional but it is what the store shows in lists)
-- Privacy policy URL: https://foxl.ai/privacy
+- Privacy policy URL: https://github.com/foxl-ai/browser-extension/blob/main/PRIVACY.md
+  (see the section above for why this is not `foxl.ai/privacy`)
 
 ## Firefox / Edge are OUT OF SCOPE
 

@@ -54,6 +54,35 @@ reads the rendered page, and nothing beneath it.
 - It does not track you across sites, build a profile, or serve advertising.
 - It does not run any remotely hosted code.
 
+## Chrome Web Store disclosure
+
+This page is the privacy policy URL for the Chrome Web Store listing, so the answers
+that listing gives are restated below in the store's own vocabulary. They are here so
+a reviewer can check the form against a document rather than take the form's word for
+it, and so the two cannot drift apart quietly.
+
+| Store data category | Collected | Detail |
+|---|---|---|
+| Website content | **Yes** | The text, labels and structure of the page you point the agent at, and a screenshot of the visible tab, are read and handed to the Foxl app on your own machine so it can decide what to read, click or type next. |
+| Personally identifiable information | No | Nothing of the kind is extracted, singled out or detected. Page content is passed through as page content; if a name or an address happens to be on the page, it is on the page. |
+| Health information | No | Not collected. |
+| Financial and payment information | No | Not collected. |
+| Authentication information | No | No password, token or cookie is read. The extension holds neither the `cookies` nor the `webRequest` permission, so it cannot. |
+| Personal communications | No | Not extracted or singled out, for the same reason as personally identifiable information above. |
+| Location | No | Not collected. No geolocation API is used. |
+| Web history | No | The extension keeps no history. It reads the URL and title of the tab it is acting on and stores neither. |
+| User activity | No | Your clicks, keystrokes and mouse movement are not recorded. The clicks and typing that do happen are the agent carrying out the instruction you gave it. |
+
+The three certifications the store requires, each true of this code:
+
+- Data is **not sold** to third parties, and is not transferred to any third party for
+  a purpose unrelated to the item's single purpose. There is no third party in the
+  path at all: the only host this extension talks to is the Foxl app on your own
+  computer.
+- Data is used **only** for the single purpose stated in the listing, which is
+  performing the browser task you asked for.
+- Data is **not used** to determine creditworthiness or for lending purposes.
+
 ## Retention
 
 The extension keeps no history. Page content and screenshots pass through it and
