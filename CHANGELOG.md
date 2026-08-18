@@ -6,6 +6,20 @@ This extension has its own version line, independent of the Foxl Desktop release
 number. It used to ship inside the Foxl monorepo, where a script kept its manifest
 version pinned to the app's unified line; the split makes the two independent.
 
+## v0.7.1 - August 18, 2026
+
+### Fixed
+
+- **The "Get Foxl Desktop" button was invisible.** On the setup screen - the one
+  every person who installs this from a store without the desktop app reaches - the
+  primary call to action rendered white on white, a 130x33 button occupying space
+  with nothing to see. `.setup-cta` set `background: currentColor` and then
+  `color: canvas` on the same element, and `currentColor` in `background` resolves
+  to that element's own `color`, so both computed to `rgb(255,255,255)`. It now uses
+  `var(--primary)` / `var(--primary-fg)`, the pair the send button already used.
+  The screen existed specifically to keep a missing desktop app from reading as a
+  broken install; with its only download link unclickable it did the opposite.
+
 ## v0.7.0 - August 18, 2026
 
 First release from its own public repository, with the source public and Apache-2.0.

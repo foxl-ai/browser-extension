@@ -318,11 +318,15 @@ body {
   font-size: 12.5px;
   font-weight: 500;
   text-decoration: none;
-  background: currentColor;
-  /* `color` is inverted by the two lines below so this reads on either theme
-     without hardcoding a palette the rest of this file does not define. */
-  color: canvas;
-  filter: none;
+  /* These two used to be `background: currentColor` + `color: canvas`, which was
+     meant to invert without hardcoding a palette. It cannot: `currentColor` in
+     `background` resolves to this element's OWN `color`, which the next line had
+     just set to `canvas` - so both computed to rgb(255,255,255) and the primary
+     CTA on the one screen every store installer without the desktop app reaches
+     was a 130x33 invisible button. Use the tokens the rest of this file uses, the
+     same pair `.send-button` uses. */
+  background: var(--primary);
+  color: var(--primary-fg);
 }
 
 .setup-link {
