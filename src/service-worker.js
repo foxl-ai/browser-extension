@@ -164,20 +164,310 @@ function clearDiscoveredUrl() {
   discoveredServerUrl = null;
 }
 
+/*
+ * ══════════════════════════════════════════════════════════════════════════════
+ *  THE LOCAL CHANNEL: NATIVE MESSAGING FIRST, THE WebSocket SECOND
+ * ══════════════════════════════════════════════════════════════════════════════
+ *
+ * 🔴 A LOOPBACK WebSocket CANNOT TELL THIS EXTENSION FROM ANY OTHER PROGRAM ON THE
+ * MACHINE, AND NO AMOUNT OF CARE AT THIS END FIXES THAT. The desktop's `/extension`
+ * path used to be gated on the `Origin:` header alone. A BROWSER sets that header and
+ * a web page cannot forge it, which makes it a real defence against a page - and it is
+ * worth exactly nothing against a process, because a raw socket writes whatever bytes
+ * it likes into the handshake. Measured against the real desktop server with a plain
+ * node `ws` client and no credential at all, `Origin: chrome-extension://aaaa...` was
+ * ACCEPTED and reached the agent with `exec`, `terminal` and `file_write` enabled.
+ *
+ * The desktop's answer was a PAIRING CODE: a 64-hex secret printed in Settings that a
+ * person copied into this extension. It works, and it is the wrong shape for the job -
+ * it puts a live credential in `chrome.storage.local` and in this extension's console,
+ * it asks every user to perform a ceremony, and a code that is never entered leaves the
+ * hole open for as long as the compatibility window lasts.
+ *
+ * NATIVE MESSAGING REMOVES THE SECRET INSTEAD OF MOVING IT. Chrome - not us - decides
+ * who may speak to the host: the host's manifest names the permitted extension ids in
+ * `allowed_origins`, "values can't contain wildcards", and Chrome refuses any other
+ * caller with "Access to the specified native messaging host is forbidden." The host is
+ * also a REAL LOCAL PROCESS rather than a sandboxed page, so it can read the desktop's
+ * own 0600 credential off disk - the one thing this extension can never do, and the
+ * entire reason the pairing code had to travel through a human in the first place.
+ * Reference: developer.chrome.com/docs/extensions/develop/concepts/native-messaging
+ * (written without a scheme on purpose - `scripts/audit.mjs` fails any source file
+ * carrying a non-local URL literal, and that gate is worth more than a clickable link.)
+ *
+ * This is also what Anthropic's own Claude extension does, measured from the installed
+ * bundle rather than assumed: it declares `nativeMessaging`, probes
+ * `com.anthropic.claude_browser_extension` and `com.anthropic.claude_code_browser_extension`
+ * with a ping/pong, and keeps no pairing code of any kind.
+ *
+ * THREE PROPERTIES OF THIS TRANSPORT THAT DIFFER FROM THE WebSocket, all from the page
+ * cited above, and each of which breaks something if forgotten:
+ *
+ *  1. FRAMES ARE OBJECTS, NOT STRINGS. Chrome serializes and parses the JSON itself, so
+ *     `port.postMessage(obj)` takes an object and `onMessage` delivers one. A
+ *     `JSON.stringify` on the way out arrives as a quoted STRING and every `message.type`
+ *     read on the far side is then undefined.
+ *  2. THE SIZE LIMITS ARE ASYMMETRIC: 64 MiB from here to the host, but "the maximum size
+ *     of a single message from the native messaging host is 1 MB" in the other direction.
+ *     An oversized frame from the host kills the port, so the HOST is where that cap is
+ *     enforced - it answers with a small error frame instead of a truncated payload.
+ *  3. THE HOST'S LIFETIME IS THE PORT'S. "Chrome starts native messaging host process and
+ *     keeps it running until the port is destroyed", so one process serves the whole
+ *     session and there is nothing to pool or reuse.
+ *
+ * WHY THE WebSocket STAYS. A desktop older than the release that installs the host
+ * manifest has nothing for `connectNative` to reach, and turning browser control off for
+ * every existing install on the day this ships is the one irreversible direction. So the
+ * native path is tried first, its absence is a normal answer, and the socket is the
+ * fallback. Delete the fallback only once the desktop floor has moved past that release.
+ */
+const NATIVE_HOST_NAME = 'ai.foxl.browser_bridge';
+
 /**
- * Connect to server via WebSocket
+ * How long to wait for the host's `pong` before calling the native path unusable.
+ *
+ * A PONG IS THE ONLY PROOF, and this is not belt-and-braces. The manifest is a FILE
+ * holding an absolute path, so it outlives the app it points at - a moved, updated or
+ * deleted Foxl leaves Chrome happily spawning a path that is gone. `connectNative`
+ * SUCCEEDS in that case (it returns a port; failures arrive later on `onDisconnect`),
+ * so a transport built on "did connectNative throw" would report a working channel into
+ * a dead process and never fall back.
+ */
+const NATIVE_PROBE_TIMEOUT_MS = 3000;
+
+/*
+ * The one live channel to the desktop, whichever kind it is:
+ *   { kind: 'native' | 'websocket', send(obj) -> bool, isOpen() -> bool, close() }
+ *
+ * Every caller goes through `transportSend` / `transportIsOpen` so that adding this
+ * second transport did not fork the ~8 places that used to touch `serverSocket`
+ * directly. `serverSocket` is still the socket itself, because the WebSocket branch
+ * below needs its `readyState`.
+ */
+let transport = null;
+
+/** Why the native host is unavailable, for the panel and for the log. */
+let nativeUnavailableReason = null;
+
+/**
+ * Is this error message Chrome saying "there is no host here"?
+ *
+ * Both spellings are Chrome's own: a missing manifest and a manifest that does not list
+ * this extension. Neither is worth retrying - the first needs the desktop app to install
+ * itself, the second needs a new manifest - so both mean "use the fallback", while any
+ * OTHER disconnect reason (the host crashed, the app was mid-update) is transient and
+ * gets the normal reconnect ladder.
+ */
+function nativeHostAbsent(message) {
+  return /native messaging host not found|host is forbidden|not found|forbidden/i.test(
+    String(message || ''),
+  );
+}
+
+/** True while a live channel of any kind is open. */
+function transportIsOpen() {
+  return !!transport?.isOpen();
+}
+
+/** Send one frame. Returns false when nothing is connected. */
+function transportSend(message) {
+  if (!transport?.isOpen()) return false;
+  try {
+    return transport.send(message);
+  } catch (err) {
+    console.error('[Foxl] Send failed:', err);
+    return false;
+  }
+}
+
+/** The kind of channel in use, for the status surfaces. `null` when down. */
+function transportKind() {
+  return transport?.isOpen() ? transport.kind : null;
+}
+
+/**
+ * Everything both transports do the moment they are up: remember the desktop, announce
+ * ourselves, start the keep-alive. Shared so the two paths cannot drift - the
+ * `extension_connected` frame is what tells the desktop our version, and a path that
+ * forgot it would look connected and be invisible to the version handshake.
+ */
+function onTransportOpen(kind) {
+  console.log(`[Foxl] Connected to desktop over ${kind}`);
+  isConnecting = false;
+  /*
+   * REMEMBER THAT A DESKTOP HAS EVER BEEN REACHABLE.
+   *
+   * This one boolean is what lets the side panel tell "you do not have Foxl
+   * Desktop" apart from "your desktop is asleep" - and until it existed, every
+   * person who installed this from a store saw the SECOND message (a grey dot
+   * titled "Disconnected") for a product they had never installed. That is the
+   * screen a store reviewer sees too.
+   *
+   * `chrome.storage.local`, not `session`: the question is "has this ever
+   * worked", and session storage is cleared on every browser restart, which
+   * would send a long-time user back to the install screen every morning.
+   *
+   * The TIMESTAMP is what makes the memory expire. A bare boolean can only be
+   * set, so a person who uninstalls Foxl Desktop is told "reconnecting
+   * automatically" forever, with no route back to the install screen - the flag
+   * that fixed one wrong message introduced another. `hasRecentDesktop()` reads
+   * the date; the boolean is still written so an older panel build and the
+   * release gate both keep working.
+   */
+  chrome.storage.local.set({ everConnected: true, lastConnectedAt: Date.now() }).catch(() => {});
+  transportSend({
+    type: 'extension_connected',
+    data: { version: chrome.runtime.getManifest().version, transport: kind },
+  });
+  startKeepAlive();
+}
+
+/** Everything both transports do when they go down. */
+function onTransportClosed(kind, detail) {
+  console.log(`[Foxl] Disconnected from desktop (${kind})${detail ? `: ${detail}` : ''}`);
+  transport = null;
+  serverSocket = null;
+  // Forget the peer's version with the connection. Keeping it would attribute the
+  // old desktop's version to whatever answers next.
+  desktopVersion = null;
+  isConnecting = false;
+  clearDiscoveredUrl();
+  stopKeepAlive();
+  scheduleReconnect();
+}
+
+/**
+ * Try the native host. Resolves to a transport, or null when it is not available.
+ *
+ * Never throws and never rejects: an absent host is the NORMAL state on a machine whose
+ * desktop predates the bridge, and treating it as an error would put a red line in the
+ * console on every reconnect for a setup that is working fine over the socket.
+ */
+function openNativeTransport() {
+  if (typeof chrome.runtime.connectNative !== 'function') {
+    nativeUnavailableReason = 'this browser has no native messaging';
+    return Promise.resolve(null);
+  }
+
+  return new Promise((resolve) => {
+    let port;
+    try {
+      port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
+    } catch (err) {
+      // Thrown when the `nativeMessaging` permission is missing, which is a packaging
+      // mistake rather than a missing desktop - so it is named differently.
+      nativeUnavailableReason = `connectNative refused: ${err.message}`;
+      resolve(null);
+      return;
+    }
+
+    let probed = false;
+    const settleProbe = (value) => {
+      if (probed) return;
+      probed = true;
+      resolve(value);
+    };
+
+    const nativeTransport = {
+      kind: 'native',
+      send: (message) => {
+        port.postMessage(message);
+        return true;
+      },
+      // A native port has no readyState. `transport` is nulled on disconnect, so
+      // identity against the live transport IS the open test.
+      isOpen: () => transport === nativeTransport,
+      close: () => {
+        try {
+          port.disconnect();
+        } catch (err) {
+          // Already gone.
+        }
+      },
+    };
+
+    port.onMessage.addListener((message) => {
+      if (!probed) {
+        /*
+         * ONLY a `pong` opens the channel. The host answers the probe before it has
+         * reached the desktop server, so anything else here - including an `error`
+         * frame naming an unreachable server - means the far side is not ready, and
+         * adopting the port on any first message would report a live channel into a
+         * host that cannot serve one.
+         */
+        if (message?.type !== 'pong') return;
+        clearTimeout(probeTimer);
+        transport = nativeTransport;
+        nativeUnavailableReason = null;
+        settleProbe(nativeTransport);
+        onTransportOpen('native');
+        return;
+      }
+      // Frames arrive already parsed - see property 1 in the block above.
+      handleServerMessage(message).catch((err) => {
+        console.error('[Foxl] Message handler error:', err);
+      });
+    });
+
+    port.onDisconnect.addListener(() => {
+      const detail = chrome.runtime.lastError?.message || '';
+      clearTimeout(probeTimer);
+      if (!probed) {
+        nativeUnavailableReason = detail || 'the native host closed the port';
+        if (!nativeHostAbsent(detail)) {
+          console.warn('[Foxl] Native host disconnected during handshake:', detail);
+        }
+        settleProbe(null);
+        return;
+      }
+      if (transport === nativeTransport) onTransportClosed('native', detail);
+    });
+
+    const probeTimer = setTimeout(() => {
+      nativeUnavailableReason = 'the native host did not answer the handshake';
+      try {
+        port.disconnect();
+      } catch (err) {
+        // Already gone.
+      }
+      settleProbe(null);
+    }, NATIVE_PROBE_TIMEOUT_MS);
+
+    try {
+      port.postMessage({ type: 'ping' });
+    } catch (err) {
+      clearTimeout(probeTimer);
+      nativeUnavailableReason = `could not reach the native host: ${err.message}`;
+      settleProbe(null);
+    }
+  });
+}
+
+/**
+ * Connect to the desktop: the native host if it is there, the WebSocket if it is not.
  */
 async function connectToServer() {
-  if (serverSocket?.readyState === WebSocket.OPEN) {
+  if (transportIsOpen()) {
     return true;
   }
-  
+
   // Prevent duplicate connection attempts
   if (isConnecting) {
     return false;
   }
   isConnecting = true;
-  
+
+  const native = await openNativeTransport();
+  if (native) return true;
+  console.log(`[Foxl] Native host unavailable (${nativeUnavailableReason}); trying the local socket`);
+
+  return openWebSocketTransport();
+}
+
+/**
+ * The pre-native transport, kept for desktops that do not install a host manifest.
+ */
+async function openWebSocketTransport() {
   // Close existing socket if in bad state
   if (serverSocket && serverSocket.readyState !== WebSocket.CLOSED) {
     try {
@@ -186,65 +476,52 @@ async function connectToServer() {
       // Ignore
     }
   }
-  
+
   const serverUrl = await getServerUrl();
   const wsUrl = serverUrl.replace('http://', 'ws://').replace('https://', 'wss://') + '/extension';
-  
+
   return new Promise((resolve) => {
     try {
       console.log('[Foxl] Connecting to', wsUrl);
       serverSocket = new WebSocket(wsUrl);
-      
+      const socket = serverSocket;
+      transport = {
+        kind: 'websocket',
+        send: (message) => {
+          socket.send(JSON.stringify(message));
+          return true;
+        },
+        isOpen: () => socket.readyState === WebSocket.OPEN,
+        close: () => socket.close(),
+      };
+
       serverSocket.onopen = () => {
-        console.log('[Foxl] Connected to server');
-        isConnecting = false;
-        /*
-         * REMEMBER THAT A DESKTOP HAS EVER BEEN REACHABLE.
-         *
-         * This one boolean is what lets the side panel tell "you do not have Foxl
-         * Desktop" apart from "your desktop is asleep" - and until it existed, every
-         * person who installed this from a store saw the SECOND message (a grey dot
-         * titled "Disconnected") for a product they had never installed. That is the
-         * screen a store reviewer sees too.
-         *
-         * `chrome.storage.local`, not `session`: the question is "has this ever
-         * worked", and session storage is cleared on every browser restart, which
-         * would send a long-time user back to the install screen every morning.
-         *
-         * The TIMESTAMP is what makes the memory expire. A bare boolean can only be
-         * set, so a person who uninstalls Foxl Desktop is told "reconnecting
-         * automatically" forever, with no route back to the install screen - the flag
-         * that fixed one wrong message introduced another. `hasRecentDesktop()` reads
-         * the date; the boolean is still written so an older panel build and the
-         * release gate both keep working.
-         */
-        chrome.storage.local.set({ everConnected: true, lastConnectedAt: Date.now() }).catch(() => {});
         // Cache the working server URL for faster reconnects
         getServerUrl().then(url => { discoveredServerUrl = url; });
-        serverSocket.send(JSON.stringify({
-          type: 'extension_connected',
-          data: { version: chrome.runtime.getManifest().version }
-        }));
-        
-        // Start keep-alive ping to prevent service worker from sleeping
-        startKeepAlive();
-        
+        onTransportOpen('websocket');
         resolve(true);
       };
-      
+
       serverSocket.onclose = (event) => {
-        console.log('[Foxl] Disconnected from server:', event.code, event.reason);
-        serverSocket = null;
-        // Forget the peer's version with the socket. Keeping it would attribute the
-        // old desktop's version to whatever answers next.
-        desktopVersion = null;
-        isConnecting = false;
-        clearDiscoveredUrl();
-        stopKeepAlive();
-        scheduleReconnect();
+        /*
+         * 4004 IS THE DESKTOP SAYING "PAIR FIRST", AND IT MUST NOT RENDER AS
+         * "Reconnecting". A desktop that enforces pairing closes an unpaired socket with
+         * `4004 extension_pairing_required`, and this handler used to log the code and
+         * schedule a retry like any other close - so the one thing the user needed to
+         * know arrived as a grey dot and an endless retry. There is nothing to type any
+         * more: the fix is a desktop new enough to install the native host, which is
+         * what the message says.
+         */
+        if (event.code === 4004) {
+          nativeUnavailableReason =
+            'this desktop requires the native host - update Foxl Desktop to reconnect the browser';
+          console.warn(`[Foxl] Desktop refused the socket: ${event.reason || 'pairing required'}.`
+            + ' Update Foxl Desktop so it can install the browser bridge.');
+        }
+        onTransportClosed('websocket', `${event.code}${event.reason ? ` ${event.reason}` : ''}`);
         resolve(false);
       };
-      
+
       serverSocket.onerror = (error) => {
         console.error('[Foxl] WebSocket error:', error);
         isConnecting = false;
@@ -274,11 +551,11 @@ function startKeepAlive() {
   stopKeepAlive();
   // Send ping every 20 seconds to keep connection alive
   keepAliveInterval = setInterval(() => {
-    if (serverSocket?.readyState === WebSocket.OPEN) {
-      serverSocket.send(JSON.stringify({ type: 'ping' }));
+    if (transportIsOpen()) {
+      transportSend({ type: 'ping' });
     } else {
-      // Socket died silently - trigger reconnect
-      console.log('[Foxl] Keep-alive detected dead socket, reconnecting...');
+      // Channel died silently - trigger reconnect
+      console.log('[Foxl] Keep-alive detected a dead channel, reconnecting...');
       stopKeepAlive();
       scheduleReconnect();
     }
@@ -324,7 +601,7 @@ function scheduleReconnect() {
 // Handle alarm-based reconnection (backup for when setTimeout doesn't fire)
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'pilot-reconnect' || alarm.name === 'pilot-health-check') {
-    if (!serverSocket || serverSocket.readyState !== WebSocket.OPEN) {
+    if (!transportIsOpen()) {
       console.log(`[Foxl] ${alarm.name}: socket not connected, reconnecting...`);
       reconnectAttempts = 0; // Reset for health check triggered reconnects
       const connected = await connectToServer();
@@ -997,24 +1274,15 @@ async function getPageInfo(tabId) {
  * Send message to server
  */
 function sendToServer(message) {
-  if (serverSocket?.readyState === WebSocket.OPEN) {
-    serverSocket.send(JSON.stringify(message));
-    return true;
-  }
-  return false;
+  return transportSend(message);
 }
 
 /**
  * Send chat message to server via HTTP (fallback)
  */
 async function sendChatMessage(message, tabId) {
-  // Try WebSocket first
-  if (serverSocket?.readyState === WebSocket.OPEN) {
-    serverSocket.send(JSON.stringify({
-      type: 'chat',
-      message,
-      tabId
-    }));
+  // Try the live channel first (native host, or the socket on an older desktop)
+  if (transportSend({ type: 'chat', message, tabId })) {
     return { success: true, pending: true };
   }
   
@@ -1119,7 +1387,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     switch (message.type) {
       case 'GET_SERVER_STATUS': {
-        const wsConnected = serverSocket?.readyState === WebSocket.OPEN;
+        // `wsConnected` keeps its name: an older side panel reads that field, and the
+        // question it answers - is the live channel up - did not change when a second
+        // kind of channel arrived. `transport` names WHICH one, for the panel that cares.
+        const wsConnected = transportIsOpen();
         const httpConnected = await checkServerHealth();
         // `everConnected` distinguishes "no desktop installed" from "desktop asleep".
         // Read here rather than in the panel so both surfaces (side panel, options)
@@ -1137,6 +1408,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({
           connected: wsConnected || httpConnected,
           wsConnected,
+          transport: transportKind(),
+          nativeUnavailableReason: transportKind() === 'native' ? null : nativeUnavailableReason,
           everConnected: seenDesktop,
           serverUrl: await getServerUrl(),
           extensionVersion: chrome.runtime.getManifest().version,

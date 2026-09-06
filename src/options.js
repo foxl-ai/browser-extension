@@ -78,18 +78,33 @@ chrome.storage.local.get(['serverUrl'], (result) => {
 async function checkConnection() {
   try {
     const response = await chrome.runtime.sendMessage({ type: 'GET_SERVER_STATUS' });
-    updateStatus(response.connected, response.serverUrl);
+    updateStatus(response.connected, response.serverUrl, response);
   } catch (err) {
     updateStatus(false);
   }
 }
 
-function updateStatus(connected, serverUrl) {
+/**
+ * Say WHICH channel is carrying the connection, not just that there is one.
+ *
+ * The two are a real difference in what the user is trusting rather than a detail: over
+ * the native bridge Chrome itself vouches for this extension's identity to the desktop,
+ * and over the plain local socket the desktop cannot tell this extension from any other
+ * program on the machine. A single "Connected" for both hides the one fact this page
+ * exists to report, and it is also the only place a user can find out that updating the
+ * desktop app would buy them something.
+ */
+function updateStatus(connected, serverUrl, peer) {
   statusDot.classList.toggle('connected', connected);
-  if (connected && serverUrl) {
-    statusText.textContent = `Connected to ${serverUrl}`;
+  if (connected && peer?.transport === 'native') {
+    statusText.textContent = 'Connected over the verified native bridge';
+  } else if (connected && serverUrl) {
+    statusText.textContent = `Connected to ${serverUrl} over the local socket`
+      + ' - update Foxl Desktop to get the verified bridge';
   } else if (connected) {
     statusText.textContent = 'Connected to Foxl server';
+  } else if (peer?.nativeUnavailableReason) {
+    statusText.textContent = `Not connected (${peer.nativeUnavailableReason})`;
   } else {
     statusText.textContent = 'Not connected';
   }
