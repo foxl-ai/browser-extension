@@ -63,7 +63,7 @@ You need **Chrome 116 or newer** and [Foxl Desktop](https://github.com/foxl-ai/f
 Press **Enter** to send and **Shift+Enter** for a new line. Starting prompts fill
 the message bar so you can edit the request before sending.
 
-The store installation updates through Chrome. The extension ID is `ijlihobebaeangjiacfomjdkhlpbmlhi`.
+The store installation updates through Chrome. The extension ID is `ijlihobebaeangjiacfomjdkhlpbmlhi`, and a copy loaded unpacked from this repository has the same ID: `manifest.json` carries the store item's public key (`key`).
 
 ### Make yourself at home
 
@@ -144,7 +144,7 @@ The network entry points are small enough to inspect directly:
 
 | Source | Requests |
 | :--- | :--- |
-| [Service worker](src/service-worker.js) | Health probes at `/api/health`, a WebSocket at `/extension`, and chat requests at `/api/chat` |
+| [Service worker](src/service-worker.js) | Chrome's native messaging to Foxl Desktop's browser bridge (`ai.foxl.browser_bridge`, no network), else health probes at `/api/health`, a WebSocket at `/extension`, and chat requests at `/api/chat` |
 | [Request watch](src/content-scripts/request-watch.js) | None. It wraps the page's own `fetch` and `XMLHttpRequest` to count the requests still running, and passes every call through unchanged |
 
 The settings page asks the service worker for its actual connection status.
@@ -155,6 +155,18 @@ node scripts/audit.mjs
 ```
 
 [Extension privacy details](PRIVACY.md) · [Foxl privacy policy](https://foxl.ai/privacy) · [Report a security issue](SECURITY.md)
+
+## How the local connection is secured
+
+Everything the extension does is a conversation with Foxl Desktop on the same computer, so what matters is how the desktop knows it is talking to this extension.
+
+**Over the local WebSocket it cannot know.** The desktop checks the `Origin` header. A browser sets that header and a web page cannot forge it, but any program on your computer can open the same socket and write any `Origin` it likes.
+
+**Since 0.14.0 the extension connects through Chrome's native messaging.** Chrome starts Foxl Desktop's browser bridge itself and lets only the extension IDs in the bridge's manifest reach it (`allowed_origins`, which takes no wildcards). The bridge is an ordinary program, so it reads the desktop's own connection key from your home folder and presents it. Nothing is stored in the browser and there is no code to copy.
+
+What it does not stop: a program already running as you can read your files and write its own manifest. It no longer takes nothing at all: it takes code running as you.
+
+A desktop without the bridge (an older one, or a browser it does not install into) still gets the WebSocket, so browser control keeps working. A desktop that requires the bridge refuses that socket, and the options page and the side panel then say where to fix it: Foxl Desktop's **Settings > Web Access**, **Reinstall browser connection**.
 
 ## Permissions
 
@@ -170,9 +182,15 @@ The manifest requests access to all sites so the agent can work on the pages you
 | `sidePanel` | Show the conversation beside the current page. |
 | `storage` | Save connection and appearance settings locally. |
 | `alarms` | Maintain the service worker's connection lifecycle. |
+| `nativeMessaging` | Reach Foxl Desktop through Chrome's native messaging, so the desktop knows the connection is this extension (see [How the local connection is secured](#how-the-local-connection-is-secured)). |
 | `downloads` (optional) | Only after you choose **Allow** under **Download receipts** on the options page: see the downloads a Foxl task tab starts (file name, size, state) so Foxl can confirm a file was really saved. Your other downloads are never read. |
 
-Versions 0.11.0 through 0.12.2 request the same permissions as 0.9.0, and the update installs
+**0.14.0 adds one permission, `nativeMessaging`, and Chrome turns Foxl off after that update until you accept it.**
+Its prompt reads "Communicate with cooperating native applications" (Chrome's rule for an update that adds a
+warning: "the extension will be disabled until the user accepts the new permission"). Open Chrome's menu and
+choose "Foxl is disabled", or open `chrome://extensions`, and accept.
+
+Versions 0.11.0 through 0.12.2 request the same permissions as 0.9.0, and those updates install
 without a prompt. The one permission 0.11.0 added, `downloads`, is optional: Chrome asks for it ("Manage your
 downloads") only when you choose **Allow** under **Download receipts** on the options page,
 and **Turn off** there takes it back. If you are upgrading from 0.8.x or earlier, Chrome

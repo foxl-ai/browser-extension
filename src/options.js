@@ -110,7 +110,7 @@ chrome.storage.local.get(['serverUrl', 'appearance'], (result) => {
 async function checkConnection() {
   try {
     const response = await chrome.runtime.sendMessage({ type: 'GET_SERVER_STATUS' });
-    updateStatus(response.connected, response.serverUrl);
+    updateStatus(response.connected, response.serverUrl, response);
     return Boolean(response.connected);
   } catch (err) {
     updateStatus(false);
@@ -118,13 +118,29 @@ async function checkConnection() {
   }
 }
 
-function updateStatus(connected, serverUrl) {
+/**
+ * The connection, in the 0.10.0 page's words, with WHICH channel carries it in the tooltip.
+ *
+ * The two are a real difference in what the user is trusting rather than a detail: over
+ * the native bridge Chrome itself vouches for this extension's identity to the desktop,
+ * and over the plain local socket the desktop cannot tell this extension from any other
+ * program on the machine. The line itself says only what the person can act on: a
+ * desktop that refused the socket (4004, it requires the bridge) says where to fix it,
+ * Foxl Desktop's own Reinstall button; Foxl Desktop's Settings > Web Access says the rest.
+ */
+function updateStatus(connected, serverUrl, peer) {
   statusDot.classList.toggle('connected', connected);
-  if (connected && serverUrl) {
+  if (connected && peer?.transport === 'native') {
     statusText.textContent = 'Connected to Foxl Desktop';
-    statusText.title = serverUrl;
+    statusText.title = 'Over the verified browser connection';
+  } else if (connected && serverUrl) {
+    statusText.textContent = 'Connected to Foxl Desktop';
+    statusText.title = `${serverUrl}, over a local port`;
   } else if (connected) {
     statusText.textContent = 'Connected to Foxl Desktop';
+  } else if (peer?.desktopRequiresBridge) {
+    statusText.textContent = 'Foxl Desktop needs the verified browser connection: in Foxl Desktop, open Settings > Web Access and choose Reinstall browser connection';
+    statusText.removeAttribute('title');
   } else {
     statusText.textContent = 'Open Foxl Desktop to connect';
     statusText.removeAttribute('title');
