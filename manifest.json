@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Foxl",
-  "version": "0.7.1",
+  "version": "0.7.2",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq+CG2Q7IVysERvmnbBwpFGDpjJ7pMfYeJjPXFYhi2HTP70qKSv//VND4Xeu82VutOEjVHrl1CQJfzO7L9CzlK/UtGCjijNDb3FVbuFv7yPjao+V8tJ+Yim1XbyHNepxz35jlijGtPalLBcyX5186En4aQXNkElnqZdL8PBG0/BXlAsSNExIsnzgA9fmWkMhcILG0AfI8ViC479BXoPp2yTL4ihYJ89DWxPWhDlStmwNsrSJLkl/TqV+VxRKji2eMlPzoNTq9ZxJ5mQMAUtrxwG1aIYsPzjFo10uHzgtjzKfrd/c8jv5bD2wwotPvPTx6qMpA75AMOjWQn7QI0Z4b1wIDAQAB",
   "description": "AI agent for browser automation - reads pages, clicks, types, and navigates on your behalf",
   "homepage_url": "https://github.com/foxl-ai/browser-extension",
   "action": {
@@ -44,7 +45,8 @@
     "scripting",
     "tabs",
     "tabGroups",
-    "alarms"
+    "alarms",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "<all_urls>"

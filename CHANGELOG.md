@@ -6,6 +6,40 @@ This extension has its own version line, independent of the Foxl Desktop release
 number. It used to ship inside the Foxl monorepo, where a script kept its manifest
 version pinned to the app's unified line; the split makes the two independent.
 
+## v0.7.2 (unreleased)
+
+### Changed
+
+- **The connection to Foxl Desktop is now Chrome native messaging, and the pairing
+  code is gone.** The extension used to reach the desktop over a WebSocket on
+  `127.0.0.1`, where the desktop's only way to identify the caller was the `Origin:`
+  header - which a browser cannot forge and any local *program* can. The desktop's
+  stopgap was a 64-character pairing code the user copied into the browser; this
+  removes the secret rather than moving it. Chrome now starts the bridge process
+  itself and only lets the extension ids in the host manifest's `allowed_origins`
+  reach it (no wildcards permitted), and the bridge - being an ordinary process
+  rather than a sandboxed page - reads the desktop's own credential off a file only
+  your user account can read. Nothing is stored in the browser, and there is no
+  longer a local port for another program to knock on. Same approach as Anthropic's
+  Claude extension. Full reasoning, including what it does *not* fix, is in the
+  README under "How the local connection is secured".
+- **Requires accepting one new permission**, `nativeMessaging` ("Communicate with
+  cooperating native applications"). Chrome disables an extension after an update
+  that adds a warning until the user accepts, so this update needs one click at
+  `chrome://extensions` before browser control returns.
+- **The extension id is pinned** by putting the Chrome Web Store item's public key in
+  `manifest.json`, so a hand-loaded copy resolves to the same id
+  (`ijlihobebaeangjiacfomjdkhlpbmlhi`) as the store build. The desktop authorises one
+  id, so an unpinned unpacked copy would be refused.
+- **An older desktop still works.** A desktop that predates the bridge has no host
+  manifest for `connectNative` to find, which is a normal answer rather than an
+  error: the extension falls back to the WebSocket. The options page names the live
+  channel, so "verified bridge" and "local socket" are distinguishable rather than
+  both reading as "Connected".
+- **Close code 4004 now explains itself.** A desktop that requires the bridge closes
+  an unpaired socket with `4004 extension_pairing_required`, which this extension
+  previously rendered as the ordinary "Reconnecting" dot and retried forever.
+
 ## v0.7.1 - August 18, 2026
 
 ### Fixed

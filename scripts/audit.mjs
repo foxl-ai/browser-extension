@@ -106,10 +106,35 @@ const PERMISSION_API = {
  */
 const NO_API_SURFACE = new Set();
 
+/*
+ * Permissions whose API is a SYMBOL on an already-permitted namespace, so the
+ * namespace map above cannot see them.
+ *
+ * `nativeMessaging` is the whole reason this exists: it grants
+ * `chrome.runtime.connectNative` and `chrome.runtime.sendNativeMessage`, and `runtime`
+ * is in NEEDS_NO_PERMISSION because every extension may call the rest of it. Mapping
+ * this permission to the `runtime` namespace would therefore assert nothing at all -
+ * the check would pass on any file mentioning `chrome.runtime.` anywhere - and it is
+ * the one permission here that shows the user a warning at install time
+ * ("Communicate with cooperating native applications"), so an unused declaration is
+ * the most expensive kind. Checked on the symbol instead, which is what a reviewer
+ * asking "why does this need that?" wants to grep for.
+ */
+const PERMISSION_SYMBOL = {
+  nativeMessaging: 'connectNative',
+};
+
 const declared = new Set(manifest.permissions ?? []);
 
 for (const perm of declared) {
   if (NO_API_SURFACE.has(perm)) continue;
+  const symbol = PERMISSION_SYMBOL[perm];
+  if (symbol) {
+    if (!allSource.includes(symbol)) {
+      fail(`permission "${perm}" is declared but ${symbol} is never called - drop it from the manifest or use it`);
+    }
+    continue;
+  }
   const api = PERMISSION_API[perm];
   if (!api) {
     fail(`permission "${perm}" is declared but this audit has no rule for it - add it to PERMISSION_API or NO_API_SURFACE with a reason`);

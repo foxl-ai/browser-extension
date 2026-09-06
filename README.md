@@ -23,8 +23,23 @@ dependencies.
 
 ## Install
 
-Foxl is not on the Chrome Web Store yet, so installation is manual. This is the
-"Load unpacked" path Chrome provides for exactly this case.
+Foxl is on the Chrome Web Store:
+**[Foxl](https://chromewebstore.google.com/detail/foxl/ijlihobebaeangjiacfomjdkhlpbmlhi)**.
+That is the install to prefer - it updates itself, and Chrome verifies the package.
+
+> **Updating to 0.7.2 asks you to accept one new permission, and until you do,
+> Chrome keeps the extension switched off.** 0.7.2 adds `nativeMessaging`, whose
+> warning reads *"Communicate with cooperating native applications"*, and Chrome's
+> rule for any update that adds a warning is that "the extension will be disabled
+> until the user accepts the new permission". So after the update lands, open
+> `chrome://extensions`, accept, and the extension comes back. The permission is
+> what replaces the old pairing secret; see
+> [How the local connection is secured](#how-the-local-connection-is-secured).
+
+### Install unpacked instead
+
+The manual "Load unpacked" path still works, and it is the one to use if you want to
+read the source you are running:
 
 1. Download `foxl-browser-extension-latest.zip` from the
    [latest release](https://github.com/foxl-ai/browser-extension/releases/latest).
@@ -39,8 +54,14 @@ connects on its own; the side panel shows the connection state.
 
 Chrome will show a "Disable developer mode extensions" warning on startup while
 the extension is loaded this way. That is Chrome's blanket notice for every
-unpacked extension, not a verdict on this one, and it goes away once the Web
-Store listing is live.
+unpacked extension, not a verdict on this one; the store install above does not
+get it.
+
+An unpacked install resolves to the **same extension id as the store build**
+(`ijlihobebaeangjiacfomjdkhlpbmlhi`), because `manifest.json` pins the store's own
+public key in its `key` field. That is not cosmetic: the desktop app authorises
+exactly one id, so without the pin a hand-loaded copy would get a
+path-derived id and the desktop would refuse it. See below.
 
 ### Verify the download
 
@@ -118,6 +139,64 @@ There is no remotely hosted code. Chrome forbids it in Manifest V3, and this
 extension has nothing that would want it: no `eval`, no injected `<script src>`,
 no WebAssembly.
 
+## How the local connection is secured
+
+The extension has no AI in it. Everything it does is a conversation with the Foxl
+Desktop app on the same machine, so the question "who is the desktop actually
+talking to?" is the whole security story of this extension.
+
+**Until 0.7.2 the honest answer was "it cannot tell."** The extension opened a
+WebSocket to `127.0.0.1`, and the desktop decided whether to trust it by reading the
+`Origin:` header. A browser sets that header and a web page cannot forge it, so the
+check does stop a hostile web page - and it stops nothing else, because any program
+running on your computer can open the same socket and write whatever `Origin` it
+likes. Measured against the real desktop with a plain `ws` client and no credential:
+`Origin: chrome-extension://aaaa...` was accepted, and the connection reached the
+agent with shell, terminal and file-write tools enabled.
+
+The stopgap was a **pairing code**: the desktop printed a 64-character secret and you
+copied it into the extension. It closes the hole, and it has three costs - you have
+to perform a ceremony, the secret then lives in browser storage where any page-level
+mistake could reach it, and until you have done it the hole is still open.
+
+**0.7.2 replaces the secret with Chrome itself.** The extension now speaks to the
+desktop over Chrome's native messaging channel:
+
+```
+extension  ──stdio, spawned and vouched for by Chrome──▶  foxl browser bridge
+                                                            (a Foxl Desktop process)
+```
+
+Why that is stronger than anything achievable over a local port:
+
+- **Chrome decides who may connect, and it is not a header we could forge.** The
+  desktop installs a small manifest naming the extension ids allowed to reach it, and
+  Chrome refuses everyone else. Its own documentation is explicit that these values
+  "can't contain wildcards", and a caller that is not on the list is told "Access to
+  the specified native messaging host is forbidden."
+- **There is no listening port to find.** Chrome starts the bridge process itself and
+  connects it by pipe, so there is nothing for another local program to knock on.
+- **No secret is stored in the browser.** The bridge is an ordinary process, so it
+  reads the desktop's own credential off disk - a file only your user account can
+  read. That is the thing a sandboxed extension can never do, and the entire reason
+  the pairing code had to travel through a human.
+- **The extension id is pinned**, so this holds for a hand-loaded copy too (see
+  Install above).
+
+**What it does not fix, stated plainly:** a program already running as *you* can read
+your files and install its own manifests, so it could still impersonate a browser to
+the desktop. Nothing on a single machine can prevent that, and no local-connection
+scheme should claim to. What changed is that this no longer requires *nothing at all* -
+it requires code running as you, rather than any process that can open a TCP socket.
+
+This is also the approach Anthropic's own Claude extension takes, which is worth
+knowing if you would rather trust a pattern than a paragraph: it declares the same
+permission, connects to a native host, and keeps no pairing code either.
+
+If your desktop app is older than the release that installs the bridge, the extension
+falls back to the old WebSocket so browser control keeps working. The options page
+tells you which channel is live.
+
 ## Permissions
 
 Chrome shows a permission list at install time, and "Read and change all your
@@ -135,6 +214,7 @@ calls that need it, so you can check the claim instead of believing it.
 | `sidePanel` | The chat UI lives in Chrome's side panel. | `chrome.sidePanel.open` / `setOptions` / `setPanelBehavior` |
 | `storage` | Remember your server URL and settings. Local only; nothing is synced. | `chrome.storage.local` |
 | `alarms` | Wake the service worker on a timer. Chrome kills idle MV3 workers after 30s, which would drop the connection mid-task. | `chrome.alarms.create`, `chrome.alarms.onAlarm` |
+| `nativeMessaging` | Talk to the Foxl Desktop app through Chrome instead of through a local network port. This is the change that let the extension stop storing a pairing secret - see [How the local connection is secured](#how-the-local-connection-is-secured). | `chrome.runtime.connectNative('ai.foxl.browser_bridge')` |
 
 `notifications`, `webNavigation` and `activeTab` used to be declared and are gone.
 Nothing in the source ever called any of them, and `notifications` contributed an
