@@ -9,7 +9,8 @@ asks for access to every site you visit should not be a black box, and this one
 is about 2,400 lines of plain JavaScript with no build step and no bundled
 dependencies.
 
-- **Manual install and verification:** [Install](#install)
+- **Install:** [Chrome Web Store](https://chromewebstore.google.com/detail/foxl/ijlihobebaeangjiacfomjdkhlpbmlhi),
+  or [from this checkout](#install-from-source-instead)
 - **Every permission, and the code that needs it:** [Permissions](#permissions)
 - **What leaves your machine:** [Where your data goes](#where-your-data-goes)
 
@@ -23,59 +24,68 @@ dependencies.
 
 ## Install
 
-Foxl is not on the Chrome Web Store yet, so installation is manual. This is the
-"Load unpacked" path Chrome provides for exactly this case.
+Foxl is on the Chrome Web Store:
 
-1. Download `foxl-browser-extension-latest.zip` from the
-   [latest release](https://github.com/foxl-ai/browser-extension/releases/latest).
-2. Unzip it. Both macOS Archive Utility and Windows Explorer extract it into a
-   folder of the same name; that folder is what you select in step 5.
-3. Open `chrome://extensions` in Chrome.
-4. Turn on **Developer mode** (top-right toggle).
-5. Click **Load unpacked** and select the unzipped folder.
+**[Add Foxl to Chrome](https://chromewebstore.google.com/detail/foxl/ijlihobebaeangjiacfomjdkhlpbmlhi)**
+(extension id `ijlihobebaeangjiacfomjdkhlpbmlhi`)
 
-The Foxl icon appears in your toolbar. Start the desktop app and the extension
-connects on its own; the side panel shows the connection state.
-
-Chrome will show a "Disable developer mode extensions" warning on startup while
-the extension is loaded this way. That is Chrome's blanket notice for every
-unpacked extension, not a verdict on this one, and it goes away once the Web
-Store listing is live.
-
-### Verify the download
-
-Every release publishes `SHA256SUMS.txt` alongside the zip. Check it before you
-unzip:
-
-```sh
-shasum -a 256 -c SHA256SUMS.txt
-```
-
-The zip is built deterministically: fixed entry order, fixed timestamps, no
-build step. So you can also rebuild it from this repository at the release tag
-and compare digests, which is a stronger check than trusting the published file:
-
-```sh
-git checkout v0.7.0
-node scripts/build.mjs
-shasum -a 256 dist/foxl-browser-extension-0.7.0.zip
-```
-
-The digest must match the one in the release's `SHA256SUMS.txt`. If it does not,
-the published zip is not this source, and you should open an issue rather than
-install it.
+That build is packed from this repository and auto-updates from the store, so
+there is nothing to download by hand and no developer-mode warning. The Foxl
+icon appears in your toolbar; start the desktop app and the extension connects
+on its own, with the side panel showing the connection state.
 
 ### Install from source instead
 
-If you would rather skip the zip entirely, clone the repository and load the
-checkout directly. There is no build step, so the working tree is the extension:
+There is no build step, so the working tree IS the extension. Clone it and load
+the checkout directly - the same thing you do to develop against it:
 
 ```sh
 git clone https://github.com/foxl-ai/browser-extension.git
 ```
 
-Then **Load unpacked** and select the clone. This is what the desktop app's
-Settings -> Web access panel links to.
+1. Open `chrome://extensions` in Chrome.
+2. Turn on **Developer mode** (top-right toggle).
+3. Click **Load unpacked** and select the clone.
+
+This is what the desktop app's Settings -> Web access panel links to. Chrome
+shows a "Disable developer mode extensions" warning on startup for every
+unpacked extension, which is why the store install above is the easier path if
+you only want to run it.
+
+If you would rather load a zip you built yourself, `node scripts/build.mjs`
+packs the same tree into `dist/` deterministically (fixed entry order, fixed
+timestamps, no dependencies) with a `SHA256SUMS.txt` beside it. No GitHub
+Release has been published yet: the store listing is the only place a prebuilt
+package is distributed today.
+
+### Verify that the store build is this source
+
+Chrome unpacks what it installed onto your disk, so you can diff the published
+package against a build from this checkout instead of trusting either one:
+
+```sh
+node scripts/build.mjs
+unzip -q dist/foxl-browser-extension-latest.zip -d /tmp/foxl-src
+diff -rq /tmp/foxl-src \
+  "$HOME/Library/Application Support/Google/Chrome"/*/Extensions/ijlihobebaeangjiacfomjdkhlpbmlhi/*/
+```
+
+(On Linux the profile lives under `~/.config/google-chrome/`; on Windows under
+`%LOCALAPPDATA%\Google\Chrome\User Data\`.)
+
+Measured against the 0.7.1 store build: every file under `src/` and `styles/`
+and every `.html` is byte-identical. The diff reports exactly three things, all
+of them packaging rather than code:
+
+- `_metadata/` - Chrome's own signature directory, written at install time.
+- `manifest.json` - the store adds `key` (the listing's public key) and
+  `update_url`. Nothing else in it differs.
+- `icons/*.png` - same dimensions and same artwork, re-rendered: at most 12/255
+  on about 1.5% of the samples, which is antialiasing. `icons/icon.svg` is the
+  source of all four.
+
+Anything else showing up in that diff is not this source, and is worth an issue
+rather than a shrug.
 
 ## Where your data goes
 
@@ -234,6 +244,13 @@ gh workflow run release.yml -f version=X.Y.Z
 The version input is a guard rather than the source of truth: the workflow re-checks
 it against `manifest.json` and `CHANGELOG.md` and refuses a tag that already exists,
 so a mistyped dispatch fails instead of shipping the wrong number.
+
+That path is unrehearsed, and worth knowing before you lean on it: none of
+`CWS_CLIENT_ID` / `CWS_CLIENT_SECRET` / `CWS_REFRESH_TOKEN` / `CWS_EXTENSION_ID`
+is set on this repository, `release.yml` has never run, and there are no tags and
+no GitHub Releases. The 0.7.1 listing was uploaded through the Chrome Web Store
+developer dashboard by hand. So the first dispatch is also the first test of the
+store-upload step; the zip build itself is exercised on every push by `ci.yml`.
 
 The Chrome Web Store listing copy, the per-permission justifications a review asks
 for, and the data-use disclosure live in [STORE-LISTING.md](STORE-LISTING.md), kept
