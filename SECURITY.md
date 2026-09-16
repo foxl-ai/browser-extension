@@ -4,9 +4,7 @@
 
 Please do not open a public issue for a security problem.
 
-Report it privately through
-[GitHub's private vulnerability reporting](https://github.com/foxl-ai/browser-extension/security/advisories/new),
-or email **security@foxl.ai**.
+Report it privately by emailing [security@foxl.ai](mailto:security@foxl.ai).
 
 Include what you need to make the problem reproducible: the extension version
 (`chrome://extensions` shows it), your Chrome version and OS, and the steps or a
