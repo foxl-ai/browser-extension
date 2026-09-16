@@ -1,268 +1,159 @@
-# Foxl Browser Extension
+<p align="center">
+  <a href="https://foxl.ai"><img src="assets/readme/foxl.svg" width="64" height="64" alt="Foxl" /></a>
+</p>
 
-The browser half of [Foxl](https://foxl.ai), a personal AI agent. This extension
-lets the agent act in the Chrome tabs you already have open, signed in as you:
-it reads the page, clicks, types, scrolls, and navigates on your behalf.
+<h1 align="center">Foxl Browser Extension</h1>
 
-The source is public so you can read it before you install it. An extension that
-asks for access to every site you visit should not be a black box, and this one
-is about 2,400 lines of plain JavaScript with no build step and no bundled
-dependencies.
+<p align="center">
+  <strong>Your browser. A little more capable.</strong><br />
+  Let your Foxl agent work in the Chrome tabs you already use.<br />
+  Open source. Plain JavaScript. Connected to your desktop.
+</p>
 
-- **Install:** [Chrome Web Store](https://chromewebstore.google.com/detail/foxl/ijlihobebaeangjiacfomjdkhlpbmlhi),
-  or [from this checkout](#install-from-source-instead)
-- **Every permission, and the code that needs it:** [Permissions](#permissions)
-- **What leaves your machine:** [Where your data goes](#where-your-data-goes)
+<p align="center">
+  <a href="https://chromewebstore.google.com/detail/foxl/ijlihobebaeangjiacfomjdkhlpbmlhi"><strong>Add to Chrome</strong></a> &nbsp;·&nbsp;
+  <a href="#get-started">Get started</a> &nbsp;·&nbsp;
+  <a href="#permissions">Permissions</a> &nbsp;·&nbsp;
+  <a href="docs/DEVELOPMENT.md">Developer guide</a> &nbsp;·&nbsp;
+  <a href="LICENSE">License</a>
+</p>
 
-## Requirements
+Foxl's browser extension gives your desktop agent a way to read pages, follow links, fill forms, and move between tabs. It works with your existing browser session, so you can bring the sites you already use into a conversation.
 
-- Chrome 116 or newer (the side panel API landed in 116). Edge and other
-  Chromium browsers work; Firefox is not supported yet.
-- The Foxl desktop app running on the same machine. The extension is useless on
-  its own: it has no AI in it and no server to talk to. Get the app at
-  [foxl.ai](https://foxl.ai).
+The extension is the browser connection. **The Foxl desktop app runs the agent** and connects to the model you choose. Both need to be running on the same computer for the default setup.
 
-## Install
+## Get started
 
-Foxl is on the Chrome Web Store:
+You need **Chrome 116 or newer** and [Foxl Desktop](https://github.com/foxl-ai/foxl#get-started).
 
-**[Add Foxl to Chrome](https://chromewebstore.google.com/detail/foxl/ijlihobebaeangjiacfomjdkhlpbmlhi)**
-(extension id `ijlihobebaeangjiacfomjdkhlpbmlhi`)
+1. **Install the extension** from the [Chrome Web Store][chrome-store].
+2. **Open Foxl Desktop.** The extension discovers the local app automatically.
+3. **Open the Foxl side panel** from Chrome's toolbar and check the connection status.
+4. **Start with a small task.** Open a page and ask Foxl to help with it.
 
-That build is packed from this repository and auto-updates from the store, so
-there is nothing to download by hand and no developer-mode warning. The Foxl
-icon appears in your toolbar; start the desktop app and the extension connects
-on its own, with the side panel showing the connection state.
+> “Summarize this page and list the questions I should ask next.”
+
+The store installation updates through Chrome. The extension ID is `ijlihobebaeangjiacfomjdkhlpbmlhi`.
 
 ### Install from source instead
 
-There is no build step, so the working tree IS the extension. Clone it and load
-the checkout directly - the same thing you do to develop against it:
+The checkout can be loaded directly; no build or dependency installation is needed.
 
 ```sh
 git clone https://github.com/foxl-ai/browser-extension.git
 ```
 
-1. Open `chrome://extensions` in Chrome.
-2. Turn on **Developer mode** (top-right toggle).
-3. Click **Load unpacked** and select the clone.
+Open `chrome://extensions`, turn on **Developer mode**, select **Load unpacked**, and choose the cloned `browser-extension` directory. Reload the extension from that page after changing its source.
 
-This is what the desktop app's Settings -> Web access panel links to. Chrome
-shows a "Disable developer mode extensions" warning on startup for every
-unpacked extension, which is why the store install above is the easier path if
-you only want to run it.
+The extension targets Chrome. Other Chromium browsers may work, but these instructions and the store link are for Chrome.
 
-If you would rather load a zip you built yourself, `node scripts/build.mjs`
-packs the same tree into `dist/` deterministically (fixed entry order, fixed
-timestamps, no dependencies) with a `SHA256SUMS.txt` beside it. No GitHub
-Release has been published yet: the store listing is the only place a prebuilt
-package is distributed today.
+## The ideas behind the extension
 
-### Verify that the store build is this source
+**Work where you already are.** Your open tabs, familiar websites, and existing sessions stay part of the task. The side panel keeps the conversation beside the page.
 
-Chrome unpacks what it installed onto your disk, so you can diff the published
-package against a build from this checkout instead of trusting either one:
+**Make access understandable.** Every requested permission is documented below and tied to its use in the source. A small codebase and a dependency-free runtime make inspection practical.
 
-```sh
-node scripts/build.mjs
-unzip -q dist/foxl-browser-extension-latest.zip -d /tmp/foxl-src
-diff -rq /tmp/foxl-src \
-  "$HOME/Library/Application Support/Google/Chrome"/*/Extensions/ijlihobebaeangjiacfomjdkhlpbmlhi/*/
-```
+**Keep the connection visible.** Connection status, page indicators, and stop controls help you follow the work. Chrome's site-access settings let you choose which sites the extension can use.
 
-(On Linux the profile lives under `~/.config/google-chrome/`; on Windows under
-`%LOCALAPPDATA%\Google\Chrome\User Data\`.)
-
-Measured against the 0.7.1 store build: every file under `src/` and `styles/`
-and every `.html` is byte-identical. The diff reports exactly three things, all
-of them packaging rather than code:
-
-- `_metadata/` - Chrome's own signature directory, written at install time.
-- `manifest.json` - the store adds `key` (the listing's public key) and
-  `update_url`. Nothing else in it differs.
-- `icons/*.png` - same dimensions and same artwork, re-rendered: at most 12/255
-  on about 1.5% of the samples, which is antialiasing. `icons/icon.svg` is the
-  source of all four.
-
-Anything else showing up in that diff is not this source, and is worth an issue
-rather than a shrug.
-
-## Where your data goes
-
-Nowhere except your own machine. Every network call in this extension targets
-the local Foxl server; there is no analytics endpoint, no telemetry, no remote
-config, and no third-party script.
-
-You do not have to take that on faith. There are exactly six network call sites
-in the source, and this is all of them:
-
-| Call site | Target |
-|---|---|
-| `src/service-worker.js` `getServerUrl()` | `GET {serverUrl}/api/health` (port probe) |
-| `src/service-worker.js` `connectToServer()` | `WebSocket {serverUrl}/extension` |
-| `src/service-worker.js` chat send | `POST {serverUrl}/api/chat` |
-| `src/service-worker.js` health check | `GET {serverUrl}/api/health` |
-| `src/options.js` port probe | `GET {url}/api/health` |
-| `src/options.js` connection test | `GET {serverUrl}/api/health` |
-
-`serverUrl` defaults to `http://localhost:13847`, falling back to
-`http://localhost:3847` (the desktop app's production and dev ports). It is
-resolved by `getServerUrl()` and can be overridden on the options page, so the
-one way this extension talks to a non-local host is if you type one in
-yourself.
-
-Confirm the list is complete with a grep, which is cheaper than reading 2,400
-lines:
-
-```sh
-grep -rnE "fetch\(|XMLHttpRequest|new WebSocket|navigator.sendBeacon" src/
-```
-
-Page content read by the extension (the accessibility tree, screenshots) is sent
-to that local server, which is the desktop app on your own machine. What the
-desktop app does with it afterwards, including which model provider it calls, is
-that app's business and is documented at [foxl.ai](https://foxl.ai). This
-repository covers only the browser side.
-
-There is no remotely hosted code. Chrome forbids it in Manifest V3, and this
-extension has nothing that would want it: no `eval`, no injected `<script src>`,
-no WebAssembly.
-
-## Permissions
-
-Chrome shows a permission list at install time, and "Read and change all your
-data on all websites" is the alarming one. It is also unavoidable for what this
-extension does: an agent that can only act on a hardcoded allowlist of sites
-cannot do your errands. Here is every permission, what it is for, and the API
-calls that need it, so you can check the claim instead of believing it.
-
-| Permission | Why it is here | Code that uses it |
-|---|---|---|
-| `<all_urls>` (host) | Read and act on whatever page you point the agent at. Also required by `captureVisibleTab`. | Both content scripts, and `chrome.tabs.captureVisibleTab` |
-| `tabs` | Open, close, switch, and read the URL/title of tabs so a task can span several sites. | `chrome.tabs.create` / `get` / `query` / `update` / `remove` / `sendMessage` / `onUpdated` / `onRemoved` |
-| `scripting` | Inject the accessibility-tree reader into a frame that loaded before the extension did. | `chrome.scripting.executeScript` |
-| `tabGroups` | Keep the tabs the agent opened in their own labelled group, so its tabs stay separable from yours. | `chrome.tabGroups.get` / `query` / `update`, `chrome.tabs.group` |
-| `sidePanel` | The chat UI lives in Chrome's side panel. | `chrome.sidePanel.open` / `setOptions` / `setPanelBehavior` |
-| `storage` | Remember your server URL and settings. Local only; nothing is synced. | `chrome.storage.local` |
-| `alarms` | Wake the service worker on a timer. Chrome kills idle MV3 workers after 30s, which would drop the connection mid-task. | `chrome.alarms.create`, `chrome.alarms.onAlarm` |
-
-`notifications`, `webNavigation` and `activeTab` used to be declared and are gone.
-Nothing in the source ever called any of them, and `notifications` contributed an
-install-time warning for a capability the extension did not have. Every permission
-that remains maps to a call site above, and `scripts/audit.mjs` fails the build if
-that stops being true in either direction. If you see a build asking for one of the
-three removed permissions, it is not this one.
-
-Three things this extension deliberately does not request: `<all_urls>` in
-`optional_host_permissions` (so there is no silent escalation path), `cookies` /
-`webRequest` / `debugger` (it reads pages the way a screen reader does, not by
-intercepting traffic), and `notifications` (it surfaces state in its own side panel).
+**Make the package reproducible.** The build script uses an explicit file list, stable ordering, and fixed timestamps. You can rebuild the archive and compare it with another build.
 
 ## How it works
 
-```
-manifest.json               Extension configuration
-sidepanel.html              Side panel chat UI
-options.html                Settings (server URL, connection test)
-icons/                      Toolbar and store icons
-src/
-  service-worker.js         Background: WebSocket, tab management, command dispatch
-  sidepanel.js              Side panel logic
-  options.js                Settings page logic
-  content-scripts/
-    accessibility-tree.js   Turns the DOM into a labelled element tree
-    visual-indicator.js     Shows when the agent is acting on a page
-styles/                     Side panel and options CSS
-scripts/
-  build.mjs                 Deterministic release zip, zero dependencies
-  generate-icons.mjs        Re-render PNG icons from icons/icon.svg
+```mermaid
+flowchart TD
+    tabs["Your Chrome tabs and Foxl side panel"]
+    extension["Foxl browser extension"]
+    desktop["Foxl Desktop · localhost by default"]
+    model["Your configured model or connected service"]
+    tabs <-->|Page reads, actions, and results| extension
+    extension <-->|WebSocket and HTTP| desktop
+    desktop <-->|As needed for the task| model
 ```
 
-### The accessibility tree
+The content script turns a page into a compact tree of labelled elements. The agent can refer to those elements when it clicks or types:
 
-The agent does not read pixels or raw HTML. A content script walks the DOM and
-emits a compact tree of the interactive elements, each with a `ref` the agent can
-address:
-
-```
-link "Home" [ref_1] href="/"
-navigation [ref_2]
-  link "Products" [ref_3] href="/products"
-  link "About" [ref_4] href="/about"
-button "Sign In" [ref_5]
-textbox "Search" [ref_6] placeholder="Search..."
+```text
+navigation [ref_1]
+  link "Products" [ref_2] href="/products"
+  link "About" [ref_3] href="/about"
+textbox "Search" [ref_4] placeholder="Search..."
+button "Sign in" [ref_5]
 ```
 
-### Message flow
+Screenshots provide a separate visual view. A service worker handles the desktop connection, tab management, and command dispatch; content scripts carry out page actions and display activity indicators.
 
-1. You type in the side panel.
-2. Side panel -> service worker -> local Foxl server over WebSocket.
-3. The desktop agent decides on an action.
-4. Server -> service worker -> content script, which performs it.
-5. The result travels back the same way.
+## Where your data goes
 
-Messages the server sends: `read_page`, `click`, `type`, `navigate`,
-`screenshot`, `show_indicators`, `hide_indicators`.
-Messages the extension sends: `extension_connected`, `chat`, `stop_agent`,
-`response`.
+**By default, extension traffic goes to Foxl on your computer.** It discovers `http://localhost:13847`, with `http://localhost:3847` as the fallback. The options page can override that server URL; a custom endpoint changes where extension data is sent.
 
-### Visual indicators
+Page text, screenshots, tab URLs and titles, and chat requests can pass to that configured server. Foxl Desktop may then send task context to your chosen model provider or connected service. Local transport between Chrome and Desktop does not mean every part of the task stays on your computer.
 
-While the agent is acting on a page you get a teal border around the viewport, a
-highlight on the element being touched, and a "Stop Foxl" button. The agent
-cannot act invisibly.
+The extension has no analytics endpoint, remote configuration, or remotely hosted executable code. Settings are stored in `chrome.storage.local`.
 
-## Development
+The network entry points are small enough to inspect directly:
 
-No build step, no `npm install` required to run it. Load the checkout unpacked
-and reload from `chrome://extensions` after an edit.
+| Source | Requests |
+| :--- | :--- |
+| [Service worker](src/service-worker.js) | Health probes at `/api/health`, a WebSocket at `/extension`, and chat requests at `/api/chat` |
+| [Options page](src/options.js) | Health probes and connection tests at `/api/health` |
 
 ```sh
-node scripts/build.mjs      # build dist/*.zip + SHA256SUMS.txt (no dependencies)
-npm install                 # only needed for the icon generator
-npm run icons               # re-render PNGs from icons/icon.svg
+grep -rnE 'fetch\(|XMLHttpRequest|new WebSocket|navigator.sendBeacon' src/
+node scripts/audit.mjs
 ```
 
-Debugging surfaces:
+[Extension privacy details](PRIVACY.md) · [Foxl privacy policy](https://foxl.ai/privacy) · [Report a security issue](SECURITY.md)
 
-- Service worker: `chrome://extensions` -> Foxl -> "Inspect views: service worker"
-- Side panel: right-click the panel -> Inspect
-- Content scripts: the page's own DevTools console
+## Permissions
 
-## Releasing
+The manifest requests access to all sites so the agent can work on the pages you choose. You can restrict **Site access** in the extension's Chrome settings.
 
-`.github/workflows/release.yml` builds the reproducible zip, publishes it as a
-GitHub Release with `SHA256SUMS.txt`, and - when the Chrome Web Store secrets are
-configured - uploads the same zip to the store as a draft. Bump `manifest.json`'s
-`version`, add a dated `## vX.Y.Z` section to `CHANGELOG.md`, land that, then
-dispatch:
+| Permission | What it enables |
+| :--- | :--- |
+| `<all_urls>` | Read and interact with pages; capture the visible tab. |
+| `tabs` | Read tab titles and URLs, navigate, and open, switch, or close tabs. |
+| `scripting` | Inject the page reader into a frame when needed. |
+| `tabGroups` | Organize tabs opened for agent tasks. |
+| `sidePanel` | Show the conversation beside the current page. |
+| `storage` | Save connection settings locally. |
+| `alarms` | Maintain the service worker's connection lifecycle. |
+
+The extension does not request the `cookies`, `webRequest`, or `debugger` APIs. Its page access can still expose sensitive content visible on a website, so choose site access with that in mind.
+
+[manifest.json](manifest.json) declares the permissions. [scripts/audit.mjs](scripts/audit.mjs) checks permission usage and the network and executable-code surface in CI.
+
+## Find your way around
+
+| Path | Purpose |
+| :--- | :--- |
+| [src/service-worker.js](src/service-worker.js) | Connection, tabs, and command routing |
+| [src/content-scripts/](src/content-scripts/) | Page accessibility tree and visual indicators |
+| [src/sidepanel.js](src/sidepanel.js) · [sidepanel.html](sidepanel.html) | Side panel conversation |
+| [src/options.js](src/options.js) · [options.html](options.html) | Server selection and connection checks |
+| [scripts/](scripts/) | Source audit, reproducible packaging, and icon generation |
+| [CHANGELOG.md](CHANGELOG.md) | Version history |
+
+## Develop and contribute
+
+Use **Node.js 20 or newer** for the audit and package build:
 
 ```sh
-gh workflow run release.yml -f version=X.Y.Z
+node scripts/audit.mjs
+node scripts/build.mjs
 ```
 
-The version input is a guard rather than the source of truth: the workflow re-checks
-it against `manifest.json` and `CHANGELOG.md` and refuses a tag that already exists,
-so a mistyped dispatch fails instead of shipping the wrong number.
+The build writes versioned and `latest` ZIPs plus `SHA256SUMS.txt` to `dist/`. Dependencies are needed only if you want to regenerate the PNG icons.
 
-That path is unrehearsed, and worth knowing before you lean on it: none of
-`CWS_CLIENT_ID` / `CWS_CLIENT_SECRET` / `CWS_REFRESH_TOKEN` / `CWS_EXTENSION_ID`
-is set on this repository, `release.yml` has never run, and there are no tags and
-no GitHub Releases. The 0.7.1 listing was uploaded through the Chrome Web Store
-developer dashboard by hand. So the first dispatch is also the first test of the
-store-upload step; the zip build itself is exercised on every push by `ci.yml`.
+The [developer guide](docs/DEVELOPMENT.md) covers debugging, package comparison, and releases. For a change, open a pull request with the problem, the resulting behavior, and how you verified it. CI checks the audit, reproducible build, and manifest/changelog agreement.
 
-The Chrome Web Store listing copy, the per-permission justifications a review asks
-for, and the data-use disclosure live in [STORE-LISTING.md](STORE-LISTING.md), kept
-in the repo so the listing and the code cannot drift.
+## Help and license
 
-## Reporting a problem
+[Report a bug or suggest an improvement](https://github.com/foxl-ai/browser-extension/issues). Include the extension version, Chrome version, operating system, and reproduction steps.
 
-Security issues: see [SECURITY.md](SECURITY.md). Please do not open a public
-issue for those.
+Report vulnerabilities privately to [security@foxl.ai](mailto:security@foxl.ai); see [SECURITY.md](SECURITY.md).
 
-Everything else: [open an issue](https://github.com/foxl-ai/browser-extension/issues).
+Licensed under [Apache-2.0](LICENSE). See [NOTICE](NOTICE) for attribution.
 
-## License
+<p align="center"><sub>Part of <a href="https://foxl.ai">Foxl</a> · Your day. A little lighter.</sub></p>
 
-[Apache-2.0](LICENSE). Copyright 2026 Foxl AI.
+[chrome-store]: https://chromewebstore.google.com/detail/foxl/ijlihobebaeangjiacfomjdkhlpbmlhi
