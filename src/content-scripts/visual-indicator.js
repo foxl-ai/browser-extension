@@ -10,8 +10,29 @@
 (function() {
   let glowBorder = null;
   let stopContainer = null;
+  let stopButton = null;
   let statusIndicator = null;
   let isActive = false;
+  let stylesInjected = false;
+
+  /*
+   * FOXL'S OWN OVERLAY NODES, recorded where the page cannot reach them. This WeakSet lives in
+   * the content scripts' isolated world (accessibility-tree.js reads the same one), so a page
+   * cannot add its own nodes to it - unlike an id prefix or an attribute, which any page can
+   * copy. The outline, click_at / hover / key targeting and the screenshot hide all ask THIS
+   * set: a hostile page that marked its own "Cancel" like Foxl's button used to have a click
+   * at "Cancel" land on the "Delete account" under it, its buttons left out of the outline,
+   * and its content hidden from screenshots.
+   */
+  const ownNodes = window.__foxlOwnNodes || (window.__foxlOwnNodes = new WeakSet());
+  /** Every node of an overlay element we created, itself and its descendants. */
+  function own(root) {
+    ownNodes.add(root);
+    root.querySelectorAll('*').forEach((n) => ownNodes.add(n));
+    return root;
+  }
+  /** Click highlights currently on the page (they are Foxl's too, for the screenshot hide). */
+  const liveHighlights = new Set();
 
   // Pilot brand color (teal/cyan)
   const PILOT_COLOR = 'rgba(20, 184, 166, 0.7)'; // teal-500
@@ -22,7 +43,10 @@
    * Inject animation styles
    */
   function injectStyles() {
-    if (document.getElementById('pilot-agent-styles')) return;
+    // A flag, not a lookup by id: a page could plant an element with that id and keep the
+    // animation out.
+    if (stylesInjected && document.getElementById('pilot-agent-styles')) return;
+    stylesInjected = true;
 
     const style = document.createElement('style');
     style.id = 'pilot-agent-styles';
@@ -73,7 +97,7 @@
         inset 0 0 20px ${PILOT_COLOR_LIGHT},
         inset 0 0 30px ${PILOT_COLOR_FAINT};
     `;
-    return border;
+    return own(border);
   }
 
   /**
@@ -102,6 +126,8 @@
       </svg>
       <span style="vertical-align: middle;">Stop Foxl</span>
     `;
+    // The transition names its properties, never `all`: `all` includes visibility, so the
+    // button stayed visible for 0.3 s after a screenshot hid its container, and showed in it.
     button.style.cssText = `
       position: relative;
       transform: translateY(100px);
@@ -120,7 +146,7 @@
       box-shadow: 
         0 40px 80px rgba(20, 184, 166, 0.24),
         0 4px 14px rgba(20, 184, 166, 0.24);
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       opacity: 0;
       user-select: none;
       pointer-events: auto;
@@ -151,7 +177,8 @@
     });
 
     container.appendChild(button);
-    return container;
+    stopButton = button;
+    return own(container);
   }
 
   /**
@@ -180,12 +207,9 @@
       if (glowBorder) {
         glowBorder.style.opacity = '1';
       }
-      if (stopContainer) {
-        const button = stopContainer.querySelector('#pilot-agent-stop-button');
-        if (button) {
-          button.style.transform = 'translateY(0)';
-          button.style.opacity = '1';
-        }
+      if (stopButton) {
+        stopButton.style.transform = 'translateY(0)';
+        stopButton.style.opacity = '1';
       }
     });
   }
@@ -201,12 +225,9 @@
       glowBorder.style.opacity = '0';
     }
 
-    if (stopContainer) {
-      const button = stopContainer.querySelector('#pilot-agent-stop-button');
-      if (button) {
-        button.style.transform = 'translateY(100px)';
-        button.style.opacity = '0';
-      }
+    if (stopButton) {
+      stopButton.style.transform = 'translateY(100px)';
+      stopButton.style.opacity = '0';
     }
 
     // Remove after animation
@@ -219,6 +240,7 @@
         if (stopContainer?.parentNode) {
           stopContainer.parentNode.removeChild(stopContainer);
           stopContainer = null;
+          stopButton = null;
         }
       }
     }, 300);
@@ -232,7 +254,8 @@
     if (!element) return;
 
     const rect = element.getBoundingClientRect();
-    const highlight = document.createElement('div');
+    const highlight = own(document.createElement('div'));
+    liveHighlights.add(highlight);
     highlight.style.cssText = `
       position: fixed;
       top: ${rect.top - 4}px;
@@ -252,8 +275,20 @@
       highlight.style.opacity = '0';
       setTimeout(() => {
         highlight.parentNode?.removeChild(highlight);
+        liveHighlights.delete(highlight);
       }, 300);
     }, duration);
+  }
+
+  const OVERLAY_SELF_RESTORE_MS = 1500;
+  let selfRestore = null;
+  function setOverlayHidden(hidden) {
+    const visibility = hidden ? 'hidden' : '';
+    for (const el of [glowBorder, stopContainer, stopButton, ...liveHighlights]) {
+      if (el) el.style.visibility = visibility;
+    }
+    clearTimeout(selfRestore);
+    selfRestore = hidden ? setTimeout(() => setOverlayHidden(false), OVERLAY_SELF_RESTORE_MS) : null;
   }
 
   // Listen for messages from service worker
@@ -283,6 +318,27 @@
         highlightElement(message.refId, message.duration);
         sendResponse({ success: true });
         break;
+
+      /*
+       * Hide Foxl's overlay for a screenshot, so the model is not shown a "Stop Foxl" button
+       * to aim at (or a border it takes for the page). Only OUR nodes (the variables above,
+       * never a selector a page could match). `visibility` is not transitioned (see the
+       * button's transition list), so it takes effect on the next frame; the answer waits
+       * for that frame (or 150 ms, for a tab that does not paint).
+       *
+       * The hide carries a deadline (the generic check at the top refuses it when it arrives
+       * late, e.g. after a busy page freed up, by which time the service worker has given up
+       * and will send no restore), and it UNDOES ITSELF after OVERLAY_SELF_RESTORE_MS in case
+       * the restore never comes. The user's Stop button is never left hidden.
+       */
+      case 'SET_OVERLAY_HIDDEN': {
+        setOverlayHidden(!!message.hidden);
+        let answered = false;
+        const answer = () => { if (!answered) { answered = true; sendResponse({ success: true }); } };
+        requestAnimationFrame(() => requestAnimationFrame(answer));
+        setTimeout(answer, 150);
+        break;
+      }
 
       case 'GET_ACCESSIBILITY_TREE':
         try {

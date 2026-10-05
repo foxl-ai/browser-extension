@@ -6,6 +6,27 @@ This extension has its own version line, independent of the Foxl Desktop release
 number. It used to ship inside the Foxl monorepo, where a script kept its manifest
 version pinned to the app's unified line; the split makes the two independent.
 
+## v0.8.1 - October 5, 2026
+
+### Fixed
+
+- **Clicking at a point no longer presses Foxl's own Stop button.** While the agent works,
+  the page shows a "Stop Foxl" button at the bottom centre. A click at a point under it
+  pressed that button and ended the run. Now the click goes to the page element under the
+  button, and the answer says that Foxl's button was drawn there. A point where there is
+  nothing but Foxl's own controls is refused.
+- Hovering at a point skips Foxl's overlay the same way. A key press never goes to the Stop
+  button, even when the button has focus.
+- Screenshots no longer show Foxl's border and Stop button. They are hidden while the tab is
+  captured and come back right after, so the agent is not shown a button to aim at. If the
+  page is too busy to hide them in time, the screenshot is taken with them showing, and they
+  are never left hidden: a hide that arrives late is refused, and a hide undoes itself after
+  1.5 seconds.
+- **A page cannot pass its own elements off as Foxl's.** Foxl tells its own border and Stop
+  button apart from the page by remembering the elements it created, where the page cannot
+  reach. An id or attribute a page copies from Foxl's overlay does not count. In 0.8.0 a page
+  could give its own elements an id like Foxl's to keep them out of the page outline.
+
 ## v0.8.0 - October 5, 2026
 
 ### Added
