@@ -455,9 +455,8 @@
 
   /**
    * Where a person would click this element, in viewport CSS pixels, after scrolling it
-   * into view - and whether a click there would actually reach it. The service worker
-   * sends the trusted click to this point, so a cookie banner or modal covering the
-   * element has to be reported rather than clicked through.
+   * into view - and whether a click there would actually reach it (`hitsTarget`, with what
+   * covers it otherwise). The click's pointer events carry these coordinates.
    */
   window.__pilotElementInfo = function(refId) {
     const el = window.__pilotGetElement(refId);
@@ -520,14 +519,14 @@
   };
 
   /**
-   * Type WITHOUT the debugger permission: text inserted through the editing engine
-   * (`execCommand('insertText')`), which produces the same `beforeinput` / `input` events a
-   * keyboard does - isTrusted, so React's controlled inputs and rich-text editors take it.
-   * Only if that leaves the field without the text does it fall back to the native value
-   * setter plus an InputEvent, which React's value tracker also accepts.
+   * Type: text inserted through the editing engine (`execCommand('insertText')`), which
+   * produces the same `beforeinput` / `input` events a keyboard does (isTrusted), so React's
+   * controlled inputs and contenteditable rich-text editors take it. Only if that leaves the
+   * field without the text does it fall back to the native value setter plus an InputEvent,
+   * which React's value tracker also accepts.
    *
-   * The old path set `element.value` and dispatched plain `input` / `change` Events, which
-   * React overwrites on the next render, and on a contenteditable did nothing at all.
+   * The old path set `element.value` and dispatched plain `input` / `change` Events. On a
+   * contenteditable that did nothing at all; on a plain input it still worked.
    */
   window.__pilotInsertTextFallback = function(refId, text) {
     const prep = window.__pilotFocusForTyping(refId);
@@ -535,8 +534,7 @@
     const el = window.__pilotGetElement(refId);
     let inserted = false;
     try { inserted = document.execCommand('insertText', false, text); } catch { inserted = false; }
-    const holds = (textFieldValue(el) || '').includes(text);
-    if (inserted && holds) return { success: true, method: 'editing-engine' };
+    if (inserted && holdsText(textFieldValue(el), text)) return { success: true, method: 'editing-engine' };
     if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
       const proto = el instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
       Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, text);
@@ -548,6 +546,19 @@
     return { success: true, method: 'value-setter' };
   };
 
+  /**
+   * Does the field hold the text? Ignoring whitespace, and also on letters and digits only
+   * (case-insensitive), so a field that formats as you type ("(555) 123-4567") still counts.
+   * The service worker's read-back uses the same rule.
+   */
+  function holdsText(value, text) {
+    const squash = (s) => String(s ?? '').replace(/\s+/g, '');
+    if (squash(value).includes(squash(text))) return true;
+    const alnum = (s) => String(s ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+    const want = alnum(text);
+    return want.length > 0 && alnum(value).includes(want);
+  }
+
   function mouseSequence(target, x, y) {
     const base = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, view: window, button: 0 };
     const pointer = { ...base, pointerId: 1, pointerType: 'mouse', isPrimary: true };
@@ -558,19 +569,43 @@
     if (typeof target.focus === 'function') target.focus({ preventScroll: true });
     target.dispatchEvent(new PointerEvent('pointerup', pointer));
     target.dispatchEvent(new MouseEvent('mouseup', base));
-    target.click();
+    // A dispatched click runs the element's activation behaviour (a checkbox toggles, a link
+    // follows, a submit button submits) just as `element.click()` does, and it carries the
+    // point, which a page reading `clientX` / `clientY` (a map, a canvas) needs.
+    target.dispatchEvent(new MouseEvent('click', { ...base, detail: 1 }));
   }
 
   /**
-   * Click WITHOUT the debugger permission: the whole pointer/mouse sequence a real click
-   * produces (many sites act on pointerdown or mousedown, which `element.click()` alone
-   * never sends), still synthetic - `isTrusted` stays false, which only the debugger fixes.
+   * Click: the whole pointer/mouse sequence a real click produces (many sites act on
+   * pointerdown or mousedown, which `element.click()` alone never sends). Still page events,
+   * so `isTrusted` stays false.
+   *
+   * An element with NO BOX (a `display: none` checkbox behind a styled label, which the full
+   * tree lists) has no point to aim at, and the old `element.click()` still toggled it. So it
+   * gets exactly that: `el.click()`, without the pointer events.
    */
   window.__pilotClickFallback = function(refId) {
+    const el = window.__pilotGetElement(refId);
+    if (!el) return notFound(refId);
     const info = window.__pilotElementInfo(refId);
-    if (!info.success) return info;
-    mouseSequence(window.__pilotGetElement(refId), info.x, info.y);
+    if (!info.success) {
+      el.click();
+      return { success: true, method: 'synthetic', note: `${refId} has no box on the page, so it was clicked without pointer events` };
+    }
+    mouseSequence(el, info.x, info.y);
     return { success: true, method: 'synthetic' };
+  };
+
+  /** Focus an element, for a key press aimed at it (focusing does not toggle or submit). */
+  window.__pilotFocusElement = function(refId) {
+    const el = window.__pilotGetElement(refId);
+    if (!el) return notFound(refId);
+    if (typeof el.focus === 'function') el.focus({ preventScroll: false });
+    const active = deepActiveElement();
+    if (!active || !(active === el || composedContains(el, active))) {
+      return { success: false, error: `Element ${refId} (${describe(el)}) cannot take focus, so a key press would go elsewhere.` };
+    }
+    return { success: true };
   };
 
   window.__pilotClickAtFallback = function(x, y) {
@@ -599,27 +634,72 @@
     return { success: true, method: 'synthetic', target: describe(target) };
   };
 
-  /**
-   * A key press WITHOUT the debugger permission, on whatever has focus. Enter in a form
-   * goes through `requestSubmit()`, which runs the page's own submit handlers and its
-   * validation; the old `form.submit()` skipped both.
+  /*
+   * Named keys: `key` / `code` per the UI Events KeyboardEvent spec, with the legacy keyCode
+   * a page may still read.
    */
-  window.__pilotKeyFallback = function(key) {
-    const target = deepActiveElement() || document.body;
-    const init = { key, code: key.length === 1 ? '' : key, bubbles: true, cancelable: true, composed: true };
-    if (key === 'Enter') Object.assign(init, { keyCode: 13, which: 13 });
-    const notCancelled = target.dispatchEvent(new KeyboardEvent('keydown', init));
-    if (key.length === 1 || key === 'Enter') target.dispatchEvent(new KeyboardEvent('keypress', init));
-    target.dispatchEvent(new KeyboardEvent('keyup', init));
-    if (key === 'Enter' && notCancelled) {
-      const form = target.closest ? target.closest('form') : null;
-      if (form) {
-        if (typeof form.requestSubmit === 'function') form.requestSubmit();
-        else form.submit();
-        return { success: true, method: 'synthetic', submitted: true };
-      }
+  const NAMED_KEYS = {
+    enter: ['Enter', 'Enter', 13], tab: ['Tab', 'Tab', 9], escape: ['Escape', 'Escape', 27], esc: ['Escape', 'Escape', 27],
+    backspace: ['Backspace', 'Backspace', 8], delete: ['Delete', 'Delete', 46], space: [' ', 'Space', 32],
+    arrowup: ['ArrowUp', 'ArrowUp', 38], arrowdown: ['ArrowDown', 'ArrowDown', 40],
+    arrowleft: ['ArrowLeft', 'ArrowLeft', 37], arrowright: ['ArrowRight', 'ArrowRight', 39],
+    home: ['Home', 'Home', 36], end: ['End', 'End', 35], pageup: ['PageUp', 'PageUp', 33], pagedown: ['PageDown', 'PageDown', 34],
+  };
+  const MODIFIER_FLAGS = { control: 'ctrlKey', ctrl: 'ctrlKey', shift: 'shiftKey', alt: 'altKey', meta: 'metaKey', cmd: 'metaKey', command: 'metaKey' };
+
+  /** "Enter", "Escape", "a", "Control+a", "Shift+Tab" -> a KeyboardEvent init, or null. */
+  function parseKey(spec) {
+    const parts = String(spec || '').split('+').map((p) => p.trim()).filter(Boolean);
+    if (!parts.length) return null;
+    const init = { bubbles: true, cancelable: true, composed: true };
+    for (const m of parts.slice(0, -1)) {
+      const flag = MODIFIER_FLAGS[m.toLowerCase()];
+      if (!flag) return null;
+      init[flag] = true;
     }
-    return { success: true, method: 'synthetic' };
+    const last = parts[parts.length - 1];
+    const named = NAMED_KEYS[last.toLowerCase()];
+    if (named) return { ...init, key: named[0], code: named[1], keyCode: named[2], which: named[2] };
+    if (last.length !== 1) return null;
+    const upper = last.toUpperCase();
+    const code = upper >= 'A' && upper <= 'Z' ? `Key${upper}` : last >= '0' && last <= '9' ? `Digit${last}` : '';
+    return { ...init, key: last, code, keyCode: upper.charCodeAt(0), which: upper.charCodeAt(0) };
+  }
+
+  /**
+   * A key press on whatever has focus. Page events: `isTrusted` is false, so a key the
+   * BROWSER acts on by itself (Tab moving focus, typing a character) does not happen - only
+   * the page's own key handlers see it.
+   *
+   * Enter in a form goes through `requestSubmit()`, which runs the page's own submit handlers
+   * and its validation; the old `form.submit()` skipped both (and reloaded a React form). And
+   * `submitted` reports what HAPPENED: true only when a submit event was observed. A form
+   * that fails validation reports `invalid`, and a page that handles Enter itself (a chat
+   * composer calls preventDefault) reports `enterHandledByPage`.
+   */
+  window.__pilotKeyFallback = function(spec) {
+    const init = parseKey(spec);
+    if (!init) return { success: false, error: `Unknown key "${spec}". Use Enter, Tab, Escape, Backspace, Delete, Space, an arrow, Home, End, PageUp, PageDown or a character, optionally with Control+, Shift+, Alt+ or Meta+.` };
+    const target = deepActiveElement() || document.body;
+    const notCancelled = target.dispatchEvent(new KeyboardEvent('keydown', init));
+    if (init.key.length === 1 || init.key === 'Enter') target.dispatchEvent(new KeyboardEvent('keypress', init));
+    target.dispatchEvent(new KeyboardEvent('keyup', init));
+    const result = { success: true, method: 'synthetic', submitted: false };
+    if (init.key !== 'Enter' || init.ctrlKey || init.metaKey || init.altKey) return result;
+    if (!notCancelled) return { ...result, enterHandledByPage: true };
+    const form = target.closest ? target.closest('form') : (target.form || null);
+    if (!form) return result;
+    if (typeof form.checkValidity === 'function' && !form.checkValidity()) {
+      const bad = form.querySelector(':invalid');
+      return { ...result, invalid: bad ? `${describe(bad)}: ${bad.validationMessage || 'invalid'}` : 'the form is invalid' };
+    }
+    let sawSubmit = false;
+    const seen = () => { sawSubmit = true; };
+    form.addEventListener('submit', seen, { capture: true, once: true });
+    if (typeof form.requestSubmit === 'function') form.requestSubmit();
+    else form.submit();
+    form.removeEventListener('submit', seen, { capture: true });
+    return { ...result, submitted: sawSubmit };
   };
 
   /** Kept for an older service worker: the improved synthetic click. */
@@ -632,7 +712,7 @@
     const typed = window.__pilotInsertTextFallback(refId, text);
     if (!typed.success) return typed;
     const read = window.__pilotReadValue(refId);
-    if (read.success && !read.password && !(read.value || '').includes(text)) {
+    if (read.success && !read.password && !holdsText(read.value, text)) {
       return { success: false, error: `Typed into ${refId}, but it now holds ${JSON.stringify((read.value || '').slice(0, 200))}.` };
     }
     if (submit) window.__pilotKeyFallback('Enter');
