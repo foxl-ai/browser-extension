@@ -273,7 +273,7 @@
     // Foxl's own overlay (visual-indicator.js: the glow border and the "Stop Foxl" button)
     // is not part of the page. Listed, it was an unlabeled button the agent could click to
     // stop itself.
-    if (element.id && element.id.startsWith('pilot-agent-')) return;
+    if ((element.id && element.id.startsWith('pilot-agent-')) || element.hasAttribute('data-foxl-ui')) return;
 
     const include = shouldInclude(element, options) || 
                    (options.refId !== null && depth === 0);
@@ -443,10 +443,40 @@
   }
 
   /** The deepest element at a viewport point, looking through open shadow roots. */
+  /**
+   * Is this node part of Foxl's own overlay (visual-indicator.js: the glow border, the
+   * "Stop Foxl" button and its container, the click highlight)? Those carry an id starting
+   * `pilot-agent-` or a `data-foxl-ui` attribute, on themselves or an ancestor.
+   */
+  function isFoxlUi(node) {
+    for (let n = node; n; n = n.parentElement || (n.getRootNode?.() instanceof ShadowRoot ? n.getRootNode().host : null)) {
+      if (typeof n.id === 'string' && n.id.startsWith('pilot-agent-')) return true;
+      if (n.hasAttribute?.('data-foxl-ui')) return true;
+    }
+    return false;
+  }
+
+  /** The topmost element at a point in `root` that is the PAGE's, skipping Foxl's overlay. */
+  function pageElementAt(root, x, y) {
+    const stack = typeof root.elementsFromPoint === 'function' ? root.elementsFromPoint(x, y) : [root.elementFromPoint(x, y)];
+    return stack.find((el) => el && !isFoxlUi(el)) || null;
+  }
+
+  /** Is Foxl's own overlay the topmost thing at this point (the Stop Foxl button, say)? */
+  function foxlUiAt(x, y) {
+    const top = document.elementFromPoint(x, y);
+    return !!top && isFoxlUi(top);
+  }
+
+  /**
+   * The deepest PAGE element at a viewport point, looking through open shadow roots and
+   * never at Foxl's overlay: the "Stop Foxl" button sits at the bottom centre, and a
+   * click_at there used to press it and end the run.
+   */
   function deepElementFromPoint(x, y) {
-    let hit = document.elementFromPoint(x, y);
+    let hit = pageElementAt(document, x, y);
     while (hit && hit.shadowRoot) {
-      const inner = hit.shadowRoot.elementFromPoint(x, y);
+      const inner = pageElementAt(hit.shadowRoot, x, y);
       if (!inner || inner === hit) break;
       hit = inner;
     }
@@ -608,11 +638,20 @@
     return { success: true };
   };
 
+  const OVER_FOXL_UI = 'Foxl\'s own "Stop Foxl" button is drawn at this point; the action went to the page element under it.';
+
   window.__pilotClickAtFallback = function(x, y) {
+    const overFoxl = foxlUiAt(x, y);
     const target = deepElementFromPoint(x, y);
-    if (!target) return { success: false, error: `Nothing at (${x}, ${y}) - is it inside the visible page?` };
+    if (!target) {
+      return { success: false, error: overFoxl
+        ? `Only Foxl's own controls are at (${x}, ${y}), so nothing on the page was clicked.`
+        : `Nothing at (${x}, ${y}) - is it inside the visible page?` };
+    }
     mouseSequence(target, x, y);
-    return { success: true, method: 'synthetic', target: describe(target) };
+    const out = { success: true, method: 'synthetic', target: describe(target) };
+    if (overFoxl) out.note = OVER_FOXL_UI;
+    return out;
   };
 
   window.__pilotHoverFallback = function(refId, x, y) {
@@ -625,13 +664,15 @@
     } else {
       target = deepElementFromPoint(x, y);
     }
-    if (!target) return { success: false, error: 'Nothing to hover there' };
+    if (!target) return { success: false, error: foxlUiAt(x, y) ? 'Only Foxl\'s own controls are there, so nothing on the page was hovered.' : 'Nothing to hover there' };
     const base = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, view: window };
     target.dispatchEvent(new PointerEvent('pointerover', { ...base, pointerType: 'mouse' }));
     target.dispatchEvent(new MouseEvent('mouseover', base));
     target.dispatchEvent(new MouseEvent('mouseenter', { ...base, bubbles: false }));
     target.dispatchEvent(new MouseEvent('mousemove', base));
-    return { success: true, method: 'synthetic', target: describe(target) };
+    const out = { success: true, method: 'synthetic', target: describe(target) };
+    if (!refId && foxlUiAt(x, y)) out.note = OVER_FOXL_UI;
+    return out;
   };
 
   /*
@@ -687,6 +728,8 @@
       if (!target) return notFound(refId);
     }
     target = target || deepActiveElement() || document.body;
+    // Never a key press on Foxl's own Stop button, even if it has focus.
+    if (isFoxlUi(target)) target = document.body;
     const notCancelled = target.dispatchEvent(new KeyboardEvent('keydown', init));
     if (init.key.length === 1 || init.key === 'Enter') target.dispatchEvent(new KeyboardEvent('keypress', init));
     target.dispatchEvent(new KeyboardEvent('keyup', init));

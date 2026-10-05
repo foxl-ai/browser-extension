@@ -1062,7 +1062,17 @@ async function takeScreenshot(tabId) {
     }
 
     const dataUrl = await withActiveTab(tabId, async (_tid, windowId) => {
-      return await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
+      // Foxl's own overlay is not part of the page: hidden for the capture (never longer than
+      // 500 ms of waiting on a page that does not answer, e.g. one showing a dialog).
+      const hidden = await Promise.race([
+        chrome.tabs.sendMessage(tabId, { type: 'SET_OVERLAY_HIDDEN', hidden: true }).then(() => true, () => false),
+        new Promise((r) => setTimeout(() => r(false), 500)),
+      ]);
+      try {
+        return await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
+      } finally {
+        if (hidden) chrome.tabs.sendMessage(tabId, { type: 'SET_OVERLAY_HIDDEN', hidden: false }).catch(() => {});
+      }
     });
 
     return { success: true, dataUrl, tabId };

@@ -57,6 +57,7 @@
   function createGlowBorder() {
     const border = document.createElement('div');
     border.id = 'pilot-agent-glow-border';
+    border.setAttribute('data-foxl-ui', '');
     border.style.cssText = `
       position: fixed;
       top: 0;
@@ -82,6 +83,7 @@
   function createStopContainer() {
     const container = document.createElement('div');
     container.id = 'pilot-agent-stop-container';
+    container.setAttribute('data-foxl-ui', '');
     container.style.cssText = `
       position: fixed;
       bottom: 16px;
@@ -233,6 +235,7 @@
 
     const rect = element.getBoundingClientRect();
     const highlight = document.createElement('div');
+    highlight.setAttribute('data-foxl-ui', '');
     highlight.style.cssText = `
       position: fixed;
       top: ${rect.top - 4}px;
@@ -283,6 +286,22 @@
         highlightElement(message.refId, message.duration);
         sendResponse({ success: true });
         break;
+
+      /*
+       * Hide Foxl's overlay for a screenshot, so the model is not shown a "Stop Foxl" button
+       * to aim at (or a border it takes for the page). `visibility` is not transitioned, so it
+       * takes effect on the next frame; the answer waits for that frame (or 150 ms, for a tab
+       * that does not paint).
+       */
+      case 'SET_OVERLAY_HIDDEN': {
+        const visibility = message.hidden ? 'hidden' : '';
+        document.querySelectorAll('[data-foxl-ui]').forEach((el) => { el.style.visibility = visibility; });
+        let answered = false;
+        const answer = () => { if (!answered) { answered = true; sendResponse({ success: true }); } };
+        requestAnimationFrame(() => requestAnimationFrame(answer));
+        setTimeout(answer, 150);
+        break;
+      }
 
       case 'GET_ACCESSIBILITY_TREE':
         try {
