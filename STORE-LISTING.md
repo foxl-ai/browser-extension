@@ -96,6 +96,7 @@ re-verified rather than remembered. Every unused permission has been REMOVED -
 | `tabGroups` | Keeps the tabs Foxl opens in one dedicated group, so its work is visually separate from the user's own tabs. `chrome.tabGroups.get/query/update`. |
 | `alarms` | An MV3 service worker is evicted, and a `setTimeout` dies with it. Alarms carry the reconnect backoff and the health re-check so a dropped connection recovers without the user reopening the panel. |
 | `host_permissions: <all_urls>` | The product is performing a task on whatever page the user directs it at; the set of pages cannot be known in advance. Reading the accessibility tree of that page is the mechanism. |
+| `debugger` (OPTIONAL, `optional_permissions`) | Requested only when the user turns on "Trusted input" in the options page (`chrome.permissions.request` in `src/options.js`). It sends the user-directed clicks, typing and key presses through the DevTools Protocol's `Input` domain so pages receive real (trusted) input - rich-text editors and React forms ignore script-generated events - and captures the agent's own tab with `Page.captureScreenshot` without switching the user's active tab. `src/trusted-input.js`. Detached when the task ends. Optional so existing installs are not disabled by an update that adds it. |
 
 ## Data use disclosure (the dashboard's checkboxes)
 

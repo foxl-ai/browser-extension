@@ -6,6 +6,36 @@ This extension has its own version line, independent of the Foxl Desktop release
 number. It used to ship inside the Foxl monorepo, where a script kept its manifest
 version pinned to the app's unified line; the split makes the two independent.
 
+## Unreleased
+
+### Added
+
+- **Trusted input (optional).** Turn it on in the extension's options and Chrome asks
+  once for the `debugger` permission. Foxl then clicks, types and presses keys the way
+  your mouse and keyboard do, so rich-text editors (Gmail, Slack, Notion) and React forms
+  take what it types, and it can screenshot its own tab without switching away from
+  yours. Chrome shows "Foxl started debugging this browser" while a task runs; the bar
+  goes away when the task ends.
+- New actions for the agent: click at a point, press a key (Enter, Escape, Tab, arrows,
+  combinations like Control+a), and hover.
+
+### Fixed
+
+- **Typing is checked, and a failure is reported.** After typing, the extension reads the
+  field back and says so when the text is not there. It used to answer "done" for every
+  type, including into fields that ignored it.
+- **Typing works in more places without trusted input.** Text goes in through the
+  browser's own editing, which React-controlled inputs and contenteditable editors accept.
+  It used to set the value directly, which React put back and editors ignored. Enter
+  submits through the page's own submit handling (`requestSubmit`) instead of skipping it.
+- **Clicks send the whole mouse sequence** (pointer and mouse down and up, then click),
+  for sites that act on mousedown.
+- **Elements inside web components (open shadow roots) appear in the page outline** and
+  can be clicked and typed into. Editors (contenteditable) are listed as text boxes.
+- **Opening a page no longer waits 30 seconds** when the page finished loading before the
+  extension started watching for it, which made fast pages time out in Foxl Desktop.
+- Foxl's own "Stop Foxl" button no longer appears in the page outline.
+
 ## v0.7.1 - August 18, 2026
 
 ### Fixed

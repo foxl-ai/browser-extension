@@ -44,6 +44,25 @@
     </div>
 
     <div class="section">
+      <h2 class="section-title">Trusted input</h2>
+      <p class="section-description">
+        Let Foxl click and type the way your mouse and keyboard do, so editors such as Gmail,
+        Slack and Notion and forms built with React take what it types. Chrome asks you to allow
+        "Access the page debugger backend", and shows "Foxl started debugging this browser"
+        above the page while Foxl is working. Without it, Foxl uses page events, which some
+        sites ignore.
+      </p>
+      <div class="status">
+        <div class="status-dot" id="trustedDot"></div>
+        <span id="trustedText">Checking...</span>
+      </div>
+      <div class="actions">
+        <button class="button" id="trustedAllowButton">Allow trusted input</button>
+        <button class="button button-secondary" id="trustedRemoveButton">Turn off</button>
+      </div>
+    </div>
+
+    <div class="section">
       <h2 class="section-title">Shortcuts</h2>
       <p class="section-description">Keyboard shortcuts for quick access.</p>
 

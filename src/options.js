@@ -170,3 +170,40 @@ testButton.addEventListener('click', async () => {
 
 // Check connection periodically
 setInterval(checkConnection, 10000);
+
+/*
+ * TRUSTED INPUT: the optional `debugger` permission (see src/trusted-input.js for what it
+ * does and why it is optional). `chrome.permissions.request` must run inside the click
+ * handler - Chrome only shows its prompt for a user gesture - and Chrome's own prompt is
+ * where the user reads what they are granting.
+ */
+const trustedDot = document.getElementById('trustedDot');
+const trustedText = document.getElementById('trustedText');
+const trustedAllowButton = document.getElementById('trustedAllowButton');
+const trustedRemoveButton = document.getElementById('trustedRemoveButton');
+
+async function refreshTrustedInput() {
+  const granted = await chrome.permissions.contains({ permissions: ['debugger'] }).catch(() => false);
+  trustedDot.classList.toggle('connected', granted);
+  trustedText.textContent = granted ? 'On: clicks and typing are trusted input' : 'Off: Foxl uses page events';
+  trustedAllowButton.style.display = granted ? 'none' : '';
+  trustedRemoveButton.style.display = granted ? '' : 'none';
+}
+
+trustedAllowButton.addEventListener('click', async () => {
+  try {
+    await chrome.permissions.request({ permissions: ['debugger'] });
+  } finally {
+    await refreshTrustedInput();
+  }
+});
+
+trustedRemoveButton.addEventListener('click', async () => {
+  try {
+    await chrome.permissions.remove({ permissions: ['debugger'] });
+  } finally {
+    await refreshTrustedInput();
+  }
+});
+
+refreshTrustedInput();

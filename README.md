@@ -117,8 +117,9 @@ The manifest requests access to all sites so the agent can work on the pages you
 | `sidePanel` | Show the conversation beside the current page. |
 | `storage` | Save connection settings locally. |
 | `alarms` | Maintain the service worker's connection lifecycle. |
+| `debugger` (optional) | Only if you turn on **Trusted input** in the extension's options: clicks, typing and key presses are sent the way your mouse and keyboard send them, and the agent's tab can be captured without switching to it. Chrome asks you first, and shows "Foxl started debugging this browser" while it is in use. |
 
-The extension does not request the `cookies`, `webRequest`, or `debugger` APIs. Its page access can still expose sensitive content visible on a website, so choose site access with that in mind.
+The extension does not request the `cookies` or `webRequest` APIs, and it asks for `debugger` only when you choose Trusted input. Without it, clicks and typing use page events, which some sites ignore. Its page access can still expose sensitive content visible on a website, so choose site access with that in mind.
 
 [manifest.json](manifest.json) declares the permissions. [scripts/audit.mjs](scripts/audit.mjs) checks permission usage and the network and executable-code surface in CI.
 
@@ -127,9 +128,10 @@ The extension does not request the `cookies`, `webRequest`, or `debugger` APIs. 
 | Path | Purpose |
 | :--- | :--- |
 | [src/service-worker.js](src/service-worker.js) | Connection, tabs, and command routing |
+| [src/trusted-input.js](src/trusted-input.js) | Optional trusted clicks, typing, keys and tab screenshots through `chrome.debugger` |
 | [src/content-scripts/](src/content-scripts/) | Page accessibility tree and visual indicators |
 | [src/sidepanel.js](src/sidepanel.js) · [sidepanel.html](sidepanel.html) | Side panel conversation |
-| [src/options.js](src/options.js) · [options.html](options.html) | Server selection and connection checks |
+| [src/options.js](src/options.js) · [options.html](options.html) | Server selection, connection checks, and the Trusted input switch |
 | [scripts/](scripts/) | Source audit, reproducible packaging, and icon generation |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
 

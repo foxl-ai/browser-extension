@@ -106,7 +106,14 @@ const PERMISSION_API = {
  */
 const NO_API_SURFACE = new Set();
 
-const declared = new Set(manifest.permissions ?? []);
+/*
+ * `optional_permissions` count as declared, and are held to the same "used by the code"
+ * rule: an optional permission is still one a user is asked to grant. `debugger` is the
+ * one optional permission today - trusted input (src/trusted-input.js), requested from the
+ * options page - optional so an update does not disable installed copies until re-approved.
+ */
+const optional = new Set(manifest.optional_permissions ?? []);
+const declared = new Set([...(manifest.permissions ?? []), ...optional]);
 
 for (const perm of declared) {
   if (NO_API_SURFACE.has(perm)) continue;
@@ -122,7 +129,8 @@ for (const perm of declared) {
 
 /* Reverse direction: an API called without its permission fails at runtime. */
 const usedNamespaces = new Set([...allSource.matchAll(/chrome\.([a-zA-Z]+)\./g)].map((m) => m[1]));
-const NEEDS_NO_PERMISSION = new Set(['runtime', 'commands', 'i18n', 'extension']);
+// `permissions` is the API that asks for an optional permission; it needs none itself.
+const NEEDS_NO_PERMISSION = new Set(['runtime', 'commands', 'i18n', 'extension', 'permissions']);
 
 for (const ns of usedNamespaces) {
   if (NEEDS_NO_PERMISSION.has(ns)) continue;
@@ -219,5 +227,5 @@ if (failures.length) {
 }
 
 console.log(`audit ok: ${checked.join(', ')}`);
-console.log(`  permissions: ${[...declared].sort().join(', ')}`);
+console.log(`  permissions: ${[...declared].sort().map((p) => (optional.has(p) ? `${p} (optional)` : p)).join(', ')}`);
 console.log(`  chrome APIs: ${[...usedNamespaces].sort().join(', ')}`);

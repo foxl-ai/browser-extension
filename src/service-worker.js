@@ -8,6 +8,17 @@
  * - Tab management
  */
 
+import {
+  detachAll as detachTrustedInput,
+  parseKeySpec,
+  trustedClick,
+  trustedHover,
+  trustedInputAvailable,
+  trustedInsertText,
+  trustedKey,
+  trustedScreenshot,
+} from './trusted-input.js';
+
 // Configuration - try production port first, then dev
 const SERVER_PORTS = [13847, 3847];
 const DEFAULT_SERVER_URL = `http://localhost:${SERVER_PORTS[0]}`;
@@ -381,8 +392,11 @@ async function handleServerMessage(message) {
       
     case 'hide_indicators':
       await hideAgentIndicators(data?.tabId);
+      // The run is over: end the debugger session too, so Chrome's "started debugging
+      // this browser" bar goes away with the overlay instead of after its idle timeout.
+      await detachTrustedInput().catch(() => {});
       break;
-      
+
     default:
       console.log('[Foxl] Unknown message type:', type);
   }
@@ -448,9 +462,19 @@ async function executeBrowserCommand(command) {
         
       case 'click':
         return await clickElement(targetTabId, params.refId);
-        
+
       case 'type':
         return await typeInElement(targetTabId, params.refId, params.text, params.submit);
+
+      // Added with trusted input: what a person does without an element ref.
+      case 'click_at':
+        return await clickAt(targetTabId, params?.x, params?.y);
+
+      case 'press_key':
+        return await pressKey(targetTabId, params?.key, params?.refId);
+
+      case 'hover':
+        return await hoverElement(targetTabId, params?.refId, params?.x, params?.y);
         
       case 'select':
         return await selectOption(targetTabId, params.refId, params.value);
@@ -555,6 +579,25 @@ async function getAccessibilityTree(tabId, params = {}) {
   }
 }
 
+/*
+ * CLICK, TYPE, KEYS AND HOVER: trusted when the user granted `debugger`, the improved
+ * synthetic fallback otherwise - and every answer says which (`method`), because the two
+ * are not equally reliable and the agent should know what it did.
+ *
+ * The old path was `element.click()`, `element.value = text` plus two plain Events, and
+ * `form.submit()`, and it answered `{ success: true }` whatever the page did with them. A
+ * React-controlled input put its old value back on the next render, a contenteditable
+ * editor ignored `.value` entirely, and the agent was told it had worked. Typing is now
+ * READ BACK and reported as a failure when the text is not in the field.
+ */
+
+/** The text the field holds contains what was typed (whitespace-insensitive, as editors reflow it). */
+function valueHolds(value, text) {
+  // `\s` also matches the no-break spaces contenteditable editors put between words.
+  const norm = (s) => String(s ?? '').replace(/\s+/g, '');
+  return norm(value).includes(norm(text));
+}
+
 /**
  * Click element by ref ID
  */
@@ -562,7 +605,7 @@ async function clickElement(tabId, refId) {
   if (!tabId || !refId) {
     return { success: false, error: 'Tab ID and ref ID required' };
   }
-  
+
   try {
     // Show visual indicator
     await chrome.tabs.sendMessage(tabId, {
@@ -570,35 +613,131 @@ async function clickElement(tabId, refId) {
       refId,
       duration: 500
     });
-    
-    const result = await chrome.tabs.sendMessage(tabId, {
-      type: 'CLICK_ELEMENT',
-      refId
-    });
-    
-    return result;
+
+    if (await trustedInputAvailable()) {
+      const info = await chrome.tabs.sendMessage(tabId, { type: 'ELEMENT_INFO', refId });
+      if (!info?.success) return info || { success: false, error: `No answer from the page for ${refId}` };
+      // A real click lands on whatever is on top. Clicking through a banner would report
+      // success for a click the target never received.
+      if (!info.hitsTarget) {
+        return { success: false, error: `${refId} is covered by ${info.covering} at its center. Close or scroll past that first, or use click_at.` };
+      }
+      await trustedClick(tabId, info.x, info.y);
+      return { success: true, method: 'trusted', ref: refId };
+    }
+    const result = await chrome.tabs.sendMessage(tabId, { type: 'CLICK_FALLBACK', refId });
+    return { ...(result || { success: false, error: 'No answer from the page' }), ref: refId };
   } catch (err) {
     return { success: false, error: err.message };
   }
 }
 
 /**
- * Type into element
+ * Type into element: focus it and select its contents, insert the text (trusted:
+ * CDP Input.insertText; fallback: the editing engine), READ IT BACK, then press Enter if
+ * asked (trusted: a real key; fallback: keydown + requestSubmit).
  */
 async function typeInElement(tabId, refId, text, submit = false) {
   if (!tabId || !refId) {
     return { success: false, error: 'Tab ID and ref ID required' };
   }
-  
+
   try {
-    const result = await chrome.tabs.sendMessage(tabId, {
-      type: 'TYPE_IN_ELEMENT',
-      refId,
-      text,
-      submit
-    });
-    
-    return result;
+    const trusted = await trustedInputAvailable();
+    let method;
+    if (trusted) {
+      const prep = await chrome.tabs.sendMessage(tabId, { type: 'FOCUS_FOR_TYPING', refId });
+      if (!prep?.success) return prep || { success: false, error: `No answer from the page for ${refId}` };
+      await trustedInsertText(tabId, String(text));
+      method = 'trusted';
+    } else {
+      const typed = await chrome.tabs.sendMessage(tabId, { type: 'INSERT_TEXT_FALLBACK', refId, text: String(text) });
+      if (!typed?.success) return typed || { success: false, error: `No answer from the page for ${refId}` };
+      method = typed.method;
+    }
+
+    const read = await chrome.tabs.sendMessage(tabId, { type: 'READ_VALUE', refId });
+    if (!read?.success) return read || { success: false, error: `Could not read ${refId} back` };
+    if (!read.password && !valueHolds(read.value, text)) {
+      return {
+        success: false,
+        method,
+        error: `Typed into ${refId}, but the field now holds ${JSON.stringify(String(read.value).slice(0, 200))}, not the text. The page rejected or rewrote it.`,
+      };
+    }
+    if (read.password && read.length < String(text).length) {
+      return { success: false, method, error: `Typed into ${refId}, but the password field holds only ${read.length} characters.` };
+    }
+
+    let submitted = false;
+    if (submit) {
+      if (trusted) await trustedKey(tabId, 'Enter');
+      else await chrome.tabs.sendMessage(tabId, { type: 'KEY_FALLBACK', key: 'Enter' });
+      submitted = true;
+    }
+    return { success: true, method, ref: refId, verified: true, submitted };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+/** Click at a point of the page, in viewport CSS pixels (what a screenshot shows at 1x). */
+async function clickAt(tabId, x, y) {
+  if (!tabId || !Number.isFinite(x) || !Number.isFinite(y)) {
+    return { success: false, error: 'click_at needs a tab and numeric x, y (viewport CSS pixels)' };
+  }
+  try {
+    if (await trustedInputAvailable()) {
+      await trustedClick(tabId, x, y);
+      return { success: true, method: 'trusted', x, y };
+    }
+    return await chrome.tabs.sendMessage(tabId, { type: 'CLICK_AT_FALLBACK', x, y });
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+/** Press a key ("Enter", "Escape", "Tab", "ArrowDown", "Control+a") - on refId if given. */
+async function pressKey(tabId, key, refId) {
+  if (!tabId || !key) return { success: false, error: 'press_key needs a key, e.g. "Enter" or "Control+a"' };
+  if (!parseKeySpec(key)) return { success: false, error: `Unknown key "${key}"` };
+  try {
+    if (refId) {
+      const focus = await chrome.tabs.sendMessage(tabId, { type: 'ELEMENT_INFO', refId });
+      if (!focus?.success) return focus || { success: false, error: `No answer from the page for ${refId}` };
+      if (await trustedInputAvailable()) await trustedClick(tabId, focus.x, focus.y);
+      else await chrome.tabs.sendMessage(tabId, { type: 'CLICK_FALLBACK', refId });
+    }
+    if (await trustedInputAvailable()) {
+      await trustedKey(tabId, key);
+      return { success: true, method: 'trusted', key };
+    }
+    const r = await chrome.tabs.sendMessage(tabId, { type: 'KEY_FALLBACK', key: parseKeySpec(key).key });
+    return { ...(r || { success: false }), key };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+/** Move the pointer over an element (refId) or a point (x, y) - menus that open on hover. */
+async function hoverElement(tabId, refId, x, y) {
+  if (!tabId || (!refId && !(Number.isFinite(x) && Number.isFinite(y)))) {
+    return { success: false, error: 'hover needs a refId or x, y' };
+  }
+  try {
+    if (await trustedInputAvailable()) {
+      let px = x;
+      let py = y;
+      if (refId) {
+        const info = await chrome.tabs.sendMessage(tabId, { type: 'ELEMENT_INFO', refId });
+        if (!info?.success) return info || { success: false, error: `No answer from the page for ${refId}` };
+        px = info.x;
+        py = info.y;
+      }
+      await trustedHover(tabId, px, py);
+      return { success: true, method: 'trusted', x: px, y: py };
+    }
+    return await chrome.tabs.sendMessage(tabId, { type: 'HOVER_FALLBACK', refId, x, y });
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -657,27 +796,52 @@ async function navigateTab(tabId, url) {
   }
   
   try {
+    const loaded = waitForTabLoad(targetTabId);
     await chrome.tabs.update(targetTabId, { url });
-    
-    // Wait for page to load
-    await new Promise((resolve) => {
-      const listener = (updatedTabId, changeInfo) => {
-        if (updatedTabId === targetTabId && changeInfo.status === 'complete') {
-          chrome.tabs.onUpdated.removeListener(listener);
-          resolve();
-        }
-      };
-      chrome.tabs.onUpdated.addListener(listener);
-      setTimeout(() => {
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }, 30000);
-    });
-    
+    await loaded;
+
     return { success: true, tabId: targetTabId };
   } catch (err) {
     return { success: false, error: err.message };
   }
+}
+
+/**
+ * Resolve when the tab's page has loaded, or after `LOAD_WAIT_MS`.
+ *
+ * THE LISTENER USED TO BE ADDED AFTER THE NAVIGATION, so a page that finished loading
+ * in between (a fast local page, a cached one) never fired a 'complete' the listener could
+ * see, and every such `navigate` / `new_tab` sat out the full 30 s - exactly the desktop's
+ * own command timeout, so the desktop gave up first and reported "timed out" for a page
+ * that had loaded in under a second. Measured with a local page: 30 s per new tab.
+ *
+ * Now the listener is attached BEFORE the navigation starts (`navigateTab`), and for a tab
+ * whose navigation is already under way (`chrome.tabs.create`) the tab's current status is
+ * read after attaching, so a load that already completed resolves at once. 25 s, so the
+ * extension answers before the desktop's 30 s timeout ever fires.
+ */
+const LOAD_WAIT_MS = 25000;
+function waitForTabLoad(tabId, { alreadyStarted = false } = {}) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      chrome.tabs.onUpdated.removeListener(listener);
+      clearTimeout(timer);
+      resolve();
+    };
+    const listener = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') finish();
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    const timer = setTimeout(finish, LOAD_WAIT_MS);
+    if (alreadyStarted) {
+      chrome.tabs.get(tabId).then((tab) => {
+        if (tab.status === 'complete' && tab.url && tab.url !== 'about:blank') finish();
+      }).catch(finish);
+    }
+  });
 }
 
 /**
@@ -768,21 +932,7 @@ async function createBackgroundTab(url) {
     const groupId = await addTabToPilotGroup(tab.id);
     
     // Wait for page to load if URL provided
-    if (url) {
-      await new Promise((resolve) => {
-        const listener = (tabId, changeInfo) => {
-          if (tabId === tab.id && changeInfo.status === 'complete') {
-            chrome.tabs.onUpdated.removeListener(listener);
-            resolve();
-          }
-        };
-        chrome.tabs.onUpdated.addListener(listener);
-        setTimeout(() => {
-          chrome.tabs.onUpdated.removeListener(listener);
-          resolve();
-        }, 30000);
-      });
-    }
+    if (url) await waitForTabLoad(tab.id, { alreadyStarted: true });
     
     console.log('[Foxl] Created background tab:', tab.id, 'in group:', groupId);
     return { success: true, tabId: tab.id, groupId };
@@ -923,6 +1073,18 @@ async function takeScreenshot(tabId) {
     if (!tabId) {
       const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
       return { success: true, dataUrl };
+    }
+
+    // With the debugger permission the agent's tab is captured WHERE IT IS, so the user's
+    // own tab is not switched away and back for every screenshot (captureVisibleTab below
+    // only sees the visible tab). Any failure falls through to the old path.
+    if (await trustedInputAvailable()) {
+      try {
+        const dataUrl = await trustedScreenshot(tabId);
+        return { success: true, dataUrl, tabId, method: 'trusted' };
+      } catch (err) {
+        console.warn('[Foxl] debugger screenshot failed, capturing the visible tab instead:', err?.message);
+      }
     }
 
     const dataUrl = await withActiveTab(tabId, async (_tid, windowId) => {
