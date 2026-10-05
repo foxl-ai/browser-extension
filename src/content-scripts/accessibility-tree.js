@@ -667,7 +667,8 @@
   }
 
   /**
-   * A key press on whatever has focus. Page events: `isTrusted` is false, so a key the
+   * A key press on `refId` when given (the field just typed into, the element press_key
+   * names), else on whatever has focus. Page events: `isTrusted` is false, so a key the
    * BROWSER acts on by itself (Tab moving focus, typing a character) does not happen - only
    * the page's own key handlers see it.
    *
@@ -677,10 +678,15 @@
    * that fails validation reports `invalid`, and a page that handles Enter itself (a chat
    * composer calls preventDefault) reports `enterHandledByPage`.
    */
-  window.__pilotKeyFallback = function(spec) {
+  window.__pilotKeyFallback = function(spec, refId) {
     const init = parseKey(spec);
     if (!init) return { success: false, error: `Unknown key "${spec}". Use Enter, Tab, Escape, Backspace, Delete, Space, an arrow, Home, End, PageUp, PageDown or a character, optionally with Control+, Shift+, Alt+ or Meta+.` };
-    const target = deepActiveElement() || document.body;
+    let target = null;
+    if (refId) {
+      target = window.__pilotGetElement(refId);
+      if (!target) return notFound(refId);
+    }
+    target = target || deepActiveElement() || document.body;
     const notCancelled = target.dispatchEvent(new KeyboardEvent('keydown', init));
     if (init.key.length === 1 || init.key === 'Enter') target.dispatchEvent(new KeyboardEvent('keypress', init));
     target.dispatchEvent(new KeyboardEvent('keyup', init));
@@ -715,7 +721,7 @@
     if (read.success && !read.password && !holdsText(read.value, text)) {
       return { success: false, error: `Typed into ${refId}, but it now holds ${JSON.stringify((read.value || '').slice(0, 200))}.` };
     }
-    if (submit) window.__pilotKeyFallback('Enter');
+    if (submit) window.__pilotKeyFallback('Enter', refId);
     return { success: true, method: typed.method };
   };
 
