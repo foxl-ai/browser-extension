@@ -29,6 +29,10 @@ version pinned to the app's unified line; the split makes the two independent.
   skipped both and reloaded the page, so a React form's `onSubmit` never ran. The result
   now says whether a submit actually happened, or that the form is invalid, or that the
   page handled Enter itself.
+- **Clicks, typing, key presses and hovers run one at a time**, the way one keyboard and
+  mouse would. Foxl Desktop can send several at once, and they shared the page's focus, so
+  a click could land between typing and its Enter and the Enter went to the wrong element.
+  Enter after typing, and a key pressed on an element, now go to that element.
 - **Clicks send the whole mouse sequence** (pointer and mouse over, down and up, then
   click), for sites that act on mousedown. An element with no box on the page (a hidden
   checkbox behind a styled label) is still clicked the way it was before.

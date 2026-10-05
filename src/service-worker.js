@@ -364,8 +364,11 @@ async function handleServerMessage(message) {
       break;
       
     case 'browser_command':
-      // Execute browser command and send result back
-      const result = await executeBrowserCommand(data);
+      // Execute browser command and send result back. Input actions run one at a time
+      // (see oneInputAtATime); everything else stays concurrent.
+      const result = INPUT_ACTIONS.has(data?.action)
+        ? await oneInputAtATime(() => executeBrowserCommand(data))
+        : await executeBrowserCommand(data);
       if (requestId) {
         sendToServer({
           type: 'browser_result',
@@ -432,6 +435,24 @@ function broadcastTabContexts() {
     type: 'TAB_CONTEXTS_UPDATED',
     data: { tabs: contexts, focusedTabId }
   }).catch(() => {});
+}
+
+/*
+ * ONE INPUT AT A TIME. Clicks, typing, keys and hovers share the page's focus, as one
+ * person's keyboard and mouse do. Foxl Desktop runs the tool calls a model makes in one
+ * message CONCURRENTLY, and these commands are several page messages each, so they used to
+ * interleave: measured with five such calls in one message (type into an editor, type into
+ * a form field with Enter, click a checkbox, press Escape on a button, hover a menu), the
+ * click took focus between the typing and its Enter, so the form never submitted and the
+ * Escape never reached its button - and every answer said success. Reading the page, tabs
+ * and navigation do not touch focus and stay concurrent.
+ */
+const INPUT_ACTIONS = new Set(['click', 'type', 'select', 'click_at', 'press_key', 'hover']);
+let inputChain = Promise.resolve();
+function oneInputAtATime(run) {
+  const next = inputChain.then(run, run);
+  inputChain = next.then(() => {}, () => {});
+  return next;
 }
 
 /**
@@ -650,7 +671,8 @@ async function typeInElement(tabId, refId, text, submit = false) {
       // What happened, not what was asked: `submitted` is true only when a submit event
       // was observed, and `enterHandledByPage` when the page took Enter itself (a chat
       // composer that sends on Enter calls preventDefault and has no form).
-      const key = await chrome.tabs.sendMessage(tabId, { type: 'KEY_FALLBACK', key: 'Enter' });
+      // Enter goes to the field just typed into, not to whatever has focus now.
+      const key = await chrome.tabs.sendMessage(tabId, { type: 'KEY_FALLBACK', key: 'Enter', refId });
       out.submitted = !!key?.submitted;
       if (key?.enterHandledByPage) out.enterHandledByPage = true;
       if (key?.invalid) out.invalid = key.invalid;
@@ -685,7 +707,7 @@ async function pressKey(tabId, key, refId) {
       const focus = await chrome.tabs.sendMessage(tabId, { type: 'FOCUS_ELEMENT', refId });
       if (!focus?.success) return focus || { success: false, error: `No answer from the page for ${refId}` };
     }
-    const r = await chrome.tabs.sendMessage(tabId, { type: 'KEY_FALLBACK', key });
+    const r = await chrome.tabs.sendMessage(tabId, { type: 'KEY_FALLBACK', key, refId });
     return { ...(r || { success: false, error: 'No answer from the page' }), key };
   } catch (err) {
     return { success: false, error: err.message };

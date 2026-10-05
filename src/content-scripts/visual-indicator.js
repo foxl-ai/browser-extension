@@ -338,7 +338,7 @@
             CLICK_FALLBACK: () => window.__pilotClickFallback?.(message.refId),
             CLICK_AT_FALLBACK: () => window.__pilotClickAtFallback?.(message.x, message.y),
             HOVER_FALLBACK: () => window.__pilotHoverFallback?.(message.refId, message.x, message.y),
-            KEY_FALLBACK: () => window.__pilotKeyFallback?.(message.key),
+            KEY_FALLBACK: () => window.__pilotKeyFallback?.(message.key, message.refId),
           }[message.type];
           sendResponse(fn() || { success: false, error: 'Function not available' });
         } catch (err) {
