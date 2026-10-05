@@ -112,7 +112,7 @@ The manifest requests access to all sites so the agent can work on the pages you
 | :--- | :--- |
 | `<all_urls>` | Read and interact with pages; capture the visible tab. |
 | `tabs` | Read tab titles and URLs, navigate, and open, switch, or close tabs. |
-| `scripting` | Inject the page reader into a frame when needed. |
+| `scripting` | Scroll the page (`scrollPage`). The page reader and the activity indicator are declared content scripts. |
 | `tabGroups` | Organize tabs opened for agent tasks. |
 | `sidePanel` | Show the conversation beside the current page. |
 | `storage` | Save connection settings locally. |
@@ -127,10 +127,11 @@ The extension does not request the `cookies`, `webRequest`, or `debugger` APIs. 
 | Path | Purpose |
 | :--- | :--- |
 | [src/service-worker.js](src/service-worker.js) | Connection, tabs, and command routing |
+| [src/input-queue.js](src/input-queue.js) | One click / type / key at a time per tab, each with a deadline |
 | [src/content-scripts/](src/content-scripts/) | Page accessibility tree and visual indicators |
 | [src/sidepanel.js](src/sidepanel.js) · [sidepanel.html](sidepanel.html) | Side panel conversation |
 | [src/options.js](src/options.js) · [options.html](options.html) | Server selection and connection checks |
-| [scripts/](scripts/) | Source audit, reproducible packaging, and icon generation |
+| [scripts/](scripts/) | Source audit, unit tests, reproducible packaging, and icon generation |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
 
 ## Develop and contribute

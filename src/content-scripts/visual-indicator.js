@@ -258,6 +258,16 @@
 
   // Listen for messages from service worker
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    /*
+     * An input action carries its deadline (src/input-queue.js). A message that reaches the
+     * page after it - it waited behind a confirm() dialog or a hung script - is refused, not
+     * performed: by then Foxl Desktop has told the model the action failed, and doing it now
+     * would act behind the model's back (and twice, if it retried).
+     */
+    if (typeof message.deadline === 'number' && Date.now() > message.deadline) {
+      sendResponse({ success: false, nothingWasDone: true, error: 'This action reached the page after its deadline (the page was showing a dialog, or busy), so nothing was done. Take a snapshot to see the page.' });
+      return true;
+    }
     switch (message.type) {
       case 'SHOW_AGENT_INDICATORS':
         showIndicators();

@@ -30,6 +30,11 @@ jobs:
       - name: Audit permissions and network surface
         run: node scripts/audit.mjs
 
+      # The input queue's rules (one action at a time per tab, a deadline, Stop), including
+      # a page stuck on a confirm() dialog. Zero dependencies, like the audit.
+      - name: Unit tests
+        run: node --test scripts/input-queue.test.mjs
+
       # Build the release zip and prove it is reproducible: build twice and
       # require identical bytes. A drift here means the "rebuild at the tag and
       # compare digests" instruction in the README would fail for an honest

@@ -98,9 +98,12 @@ Anything the desktop app retains after receiving this data is covered by
   set "Site access" to "On specific sites" or "On click". The extension asks for
   access to all sites because an agent limited to a fixed list cannot run your
   errands, but you are not obliged to grant it.
-- **See when it acts.** While the agent is working on a page you get a border
-  around the viewport, a highlight on the element being touched, and a stop
-  button. It cannot act invisibly.
+- **See when it acts.** The tabs the agent opens sit in their own tab group
+  named "Foxl", and an element it clicks is briefly outlined. A border around
+  the page and a **Stop Foxl** button appear while it works only when the Foxl
+  Desktop app tells the extension that a run is under way. Desktop versions
+  that do not send that signal leave them off, so with those versions the agent
+  can type and click on a page without the border showing.
 - **Cut the connection.** Quit the desktop app. With nothing listening on
   localhost the extension can do nothing at all.
 - **Remove it.** Uninstalling from `chrome://extensions` takes its stored
