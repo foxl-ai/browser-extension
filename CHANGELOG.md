@@ -6,6 +6,58 @@ This extension has its own version line, independent of the Foxl Desktop release
 number. It used to ship inside the Foxl monorepo, where a script kept its manifest
 version pinned to the app's unified line; the split makes the two independent.
 
+## v0.8.0 - October 5, 2026
+
+### Added
+
+- New actions for the agent: click at a point of the page, press a key (Enter, Escape,
+  Tab, arrows, or a combination like Control+a), and hover over an element or a point.
+  Pressing a key on an element focuses it first; it does not click it.
+
+### Fixed
+
+- **Typing is checked, and a failure is reported.** After typing, the extension reads the
+  field back and says so when the text is not there. It used to answer "done" for every
+  type, including into fields that ignored it. A field that formats what you type (a phone
+  number shown as "(555) 123-4567") counts as holding it.
+- **Typing into rich-text editors works.** Text goes in through the browser's own editing
+  (`insertText`), which contenteditable editors accept. The old path set `.value`, which
+  an editor does not have, so nothing was typed. Plain and React-controlled inputs already
+  took the old path's text and still do.
+- **Enter submits through the page's own submit handling.** It calls `requestSubmit()`,
+  so the page's submit handler and the form's validation run. The old `form.submit()`
+  skipped both and reloaded the page, so a React form's `onSubmit` never ran. The result
+  now says whether a submit actually happened, or that the form is invalid, or that the
+  page handled Enter itself.
+- **Clicks, typing, key presses and hovers on a tab run one at a time**, the way one
+  keyboard and mouse would. Foxl Desktop can send several at once, and they shared the
+  page's focus, so a click could land between typing and its Enter and the Enter went to
+  the wrong element. Enter after typing, and a key pressed on an element, now go to that
+  element. A tab whose page stops answering (a button that opens a confirm dialog, a hung
+  script) holds only its own actions, and for at most 25 seconds: an action that could not
+  start in time, or that reaches the page after that, is refused with "nothing was done"
+  instead of running later. Stop Foxl cancels the actions still waiting.
+- **Clicks send the whole mouse sequence** (pointer and mouse over, down and up, then
+  click), for sites that act on mousedown. An element with no box on the page (a hidden
+  checkbox behind a styled label) is still clicked the way it was before.
+- **Elements inside web components (open shadow roots) appear in the page outline** and
+  can be clicked and typed into. Editors (contenteditable) are listed as text boxes.
+- **Opening a page no longer waits 30 seconds** when the page finished loading before the
+  extension started watching for it, which made fast pages time out in Foxl Desktop.
+- Foxl's own "Stop Foxl" button no longer appears in the page outline.
+- **The full page outline of a very large page is fast.** Each element's ref was found by
+  scanning every ref so far, so a page with 18,000 controls took 21 seconds (37 seconds the
+  second time, past Foxl Desktop's 30-second limit). It takes under 50 ms now.
+- PRIVACY.md says when the activity border and the Stop Foxl button appear (only when
+  Foxl Desktop signals a run), and the store listing and README say what `scripting` is
+  used for (scrolling).
+
+### Known limits
+
+- Clicks, key presses and hovers are still page events, not your real mouse and
+  keyboard. A key the browser itself acts on (Tab moving focus) does not happen, and a
+  site that checks whether input came from a person ignores them.
+
 ## v0.7.1 - August 18, 2026
 
 ### Fixed

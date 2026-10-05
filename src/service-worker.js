@@ -8,6 +8,8 @@
  * - Tab management
  */
 
+import { createInputQueue } from './input-queue.js';
+
 // Configuration - try production port first, then dev
 const SERVER_PORTS = [13847, 3847];
 const DEFAULT_SERVER_URL = `http://localhost:${SERVER_PORTS[0]}`;
@@ -364,8 +366,15 @@ async function handleServerMessage(message) {
       break;
       
     case 'browser_command':
-      // Execute browser command and send result back
-      const result = await executeBrowserCommand(data);
+      // Execute browser command and send result back. Input actions run one at a time PER
+      // TAB, each with a deadline (src/input-queue.js); everything else stays concurrent.
+      let result;
+      if (INPUT_ACTIONS.has(data?.action)) {
+        const tab = await resolveTargetTab(data.tabId);
+        result = await inputQueue.run(tab ?? 'no-tab', (deadline) => executeBrowserCommand({ ...data, tabId: tab ?? data.tabId, deadline }));
+      } else {
+        result = await executeBrowserCommand(data);
+      }
       if (requestId) {
         sendToServer({
           type: 'browser_result',
@@ -382,7 +391,7 @@ async function handleServerMessage(message) {
     case 'hide_indicators':
       await hideAgentIndicators(data?.tabId);
       break;
-      
+
     default:
       console.log('[Foxl] Unknown message type:', type);
   }
@@ -434,11 +443,21 @@ function broadcastTabContexts() {
   }).catch(() => {});
 }
 
+/*
+ * ONE INPUT AT A TIME, PER TAB, WITH A DEADLINE (src/input-queue.js has the measurements).
+ * Clicks, typing, keys and hovers on one tab share its focus, and Foxl Desktop runs a
+ * model's tool calls concurrently, so on one tab they are queued. A tab whose page is stuck
+ * (a confirm() dialog, a hung script) holds only its own queue, and only until the
+ * action's deadline; an action that could not start in time is refused, not run late.
+ */
+const INPUT_ACTIONS = new Set(['click', 'type', 'select', 'click_at', 'press_key', 'hover']);
+const inputQueue = createInputQueue();
+
 /**
  * Execute browser command from server
  */
 async function executeBrowserCommand(command) {
-  const { action, tabId, params } = command;
+  const { action, tabId, params, deadline } = command;
   const targetTabId = await resolveTargetTab(tabId);
   
   try {
@@ -447,13 +466,23 @@ async function executeBrowserCommand(command) {
         return await getAccessibilityTree(targetTabId, params);
         
       case 'click':
-        return await clickElement(targetTabId, params.refId);
-        
+        return await clickElement(targetTabId, params.refId, deadline);
+
       case 'type':
-        return await typeInElement(targetTabId, params.refId, params.text, params.submit);
+        return await typeInElement(targetTabId, params.refId, params.text, params.submit, deadline);
+
+      // Added in 0.8.0: what a person does without an element ref (page events).
+      case 'click_at':
+        return await clickAt(targetTabId, params?.x, params?.y, deadline);
+
+      case 'press_key':
+        return await pressKey(targetTabId, params?.key, params?.refId, deadline);
+
+      case 'hover':
+        return await hoverElement(targetTabId, params?.refId, params?.x, params?.y, deadline);
         
       case 'select':
-        return await selectOption(targetTabId, params.refId, params.value);
+        return await selectOption(targetTabId, params.refId, params.value, deadline);
         
       case 'navigate':
         return await navigateTab(targetTabId, params.url);
@@ -555,50 +584,145 @@ async function getAccessibilityTree(tabId, params = {}) {
   }
 }
 
+/*
+ * CLICK, TYPE, KEYS AND HOVER, and what each one really did.
+ *
+ * The old path was `element.click()`, `element.value = text` plus two plain Events, and
+ * `form.submit()`, and it answered `{ success: true }` whatever the page did with them: a
+ * contenteditable editor ignored `.value` entirely, Enter skipped the page's own submit
+ * handling (and reloaded a React form), and the agent was told it had worked. Typing is now
+ * READ BACK and reported as a failure when the text is not in the field, and every answer
+ * names how it acted (`method`).
+ *
+ * All of this is page events from the content script. Trusted input (chrome.debugger) is
+ * NOT here: Chrome refuses `debugger` as an optional permission, and as a required one it
+ * would bypass the user's per-site access settings ("On click" sites become readable).
+ */
+
+/**
+ * Does the field hold what was typed? Whitespace-insensitive (editors reflow it, and `\s`
+ * also matches their no-break spaces), and also on LETTERS AND DIGITS ONLY, case-insensitive,
+ * so a masked input that formats as you type (5551234567 -> "(555) 123-4567") is not
+ * reported as a failure.
+ */
+function valueHolds(value, text) {
+  const squash = (s) => String(s ?? '').replace(/\s+/g, '');
+  if (squash(value).includes(squash(text))) return true;
+  const alnum = (s) => String(s ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  const want = alnum(text);
+  return want.length > 0 && alnum(value).includes(want);
+}
+
 /**
  * Click element by ref ID
  */
-async function clickElement(tabId, refId) {
+async function clickElement(tabId, refId, deadline) {
   if (!tabId || !refId) {
     return { success: false, error: 'Tab ID and ref ID required' };
   }
-  
+
   try {
     // Show visual indicator
     await chrome.tabs.sendMessage(tabId, {
       type: 'HIGHLIGHT_ELEMENT',
       refId,
-      duration: 500
+      duration: 500,
+      deadline,
     });
-    
-    const result = await chrome.tabs.sendMessage(tabId, {
-      type: 'CLICK_ELEMENT',
-      refId
-    });
-    
-    return result;
+
+    const result = await chrome.tabs.sendMessage(tabId, { type: 'CLICK_FALLBACK', refId, deadline });
+    return { ...(result || { success: false, error: 'No answer from the page' }), ref: refId };
   } catch (err) {
     return { success: false, error: err.message };
   }
 }
 
 /**
- * Type into element
+ * Type into element: focus it and select its contents, insert the text through the
+ * editing engine, READ IT BACK, then press Enter if asked and report whether the form
+ * really submitted.
  */
-async function typeInElement(tabId, refId, text, submit = false) {
+async function typeInElement(tabId, refId, text, submit = false, deadline) {
   if (!tabId || !refId) {
     return { success: false, error: 'Tab ID and ref ID required' };
   }
-  
+
   try {
-    const result = await chrome.tabs.sendMessage(tabId, {
-      type: 'TYPE_IN_ELEMENT',
-      refId,
-      text,
-      submit
-    });
-    
-    return result;
+    const typed = await chrome.tabs.sendMessage(tabId, { type: 'INSERT_TEXT_FALLBACK', refId, text: String(text), deadline });
+    if (!typed?.success) return typed || { success: false, error: `No answer from the page for ${refId}` };
+    const method = typed.method;
+
+    const read = await chrome.tabs.sendMessage(tabId, { type: 'READ_VALUE', refId });
+    if (!read?.success) return read || { success: false, error: `Could not read ${refId} back` };
+    if (!read.password && !valueHolds(read.value, text)) {
+      return {
+        success: false,
+        method,
+        error: `Typed into ${refId}, but the field now holds ${JSON.stringify(String(read.value).slice(0, 200))}, not the text. The page rejected or rewrote it.`,
+      };
+    }
+    if (read.password && read.length < String(text).length) {
+      return { success: false, method, error: `Typed into ${refId}, but the password field holds only ${read.length} characters.` };
+    }
+
+    const out = { success: true, method, ref: refId, verified: true, submitted: false };
+    if (submit) {
+      // What happened, not what was asked: `submitted` is true only when a submit event
+      // was observed, and `enterHandledByPage` when the page took Enter itself (a chat
+      // composer that sends on Enter calls preventDefault and has no form).
+      // Enter goes to the field just typed into, not to whatever has focus now.
+      const key = await chrome.tabs.sendMessage(tabId, { type: 'KEY_FALLBACK', key: 'Enter', refId, deadline });
+      if (key?.nothingWasDone) {
+        return { success: false, method, ref: refId, nothingWasDone: true, error: `Typed into ${refId}, but Enter reached the page after its deadline and was not pressed: ${key.error}` };
+      }
+      out.submitted = !!key?.submitted;
+      if (key?.enterHandledByPage) out.enterHandledByPage = true;
+      if (key?.invalid) out.invalid = key.invalid;
+    }
+    return out;
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+/** Click at a point of the page, in viewport CSS pixels (what a screenshot shows at 1x). */
+async function clickAt(tabId, x, y, deadline) {
+  if (!tabId || !Number.isFinite(x) || !Number.isFinite(y)) {
+    return { success: false, error: 'click_at needs a tab and numeric x, y (viewport CSS pixels)' };
+  }
+  try {
+    return await chrome.tabs.sendMessage(tabId, { type: 'CLICK_AT_FALLBACK', x, y, deadline });
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Press a key ("Enter", "Escape", "Tab", "ArrowDown", "Control+a") on whatever has focus -
+ * on refId if given, which is FOCUSED first (not clicked: a click can toggle, submit or
+ * navigate, which is not what pressing a key on an element asks for).
+ */
+async function pressKey(tabId, key, refId, deadline) {
+  if (!tabId || !key) return { success: false, error: 'press_key needs a key, e.g. "Enter" or "Control+a"' };
+  try {
+    if (refId) {
+      const focus = await chrome.tabs.sendMessage(tabId, { type: 'FOCUS_ELEMENT', refId, deadline });
+      if (!focus?.success) return focus || { success: false, error: `No answer from the page for ${refId}` };
+    }
+    const r = await chrome.tabs.sendMessage(tabId, { type: 'KEY_FALLBACK', key, refId, deadline });
+    return { ...(r || { success: false, error: 'No answer from the page' }), key };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+/** Move the pointer over an element (refId) or a point (x, y) - menus that open on hover. */
+async function hoverElement(tabId, refId, x, y, deadline) {
+  if (!tabId || (!refId && !(Number.isFinite(x) && Number.isFinite(y)))) {
+    return { success: false, error: 'hover needs a refId or x, y' };
+  }
+  try {
+    return await chrome.tabs.sendMessage(tabId, { type: 'HOVER_FALLBACK', refId, x, y, deadline });
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -607,7 +731,7 @@ async function typeInElement(tabId, refId, text, submit = false) {
 /**
  * Select option in dropdown
  */
-async function selectOption(tabId, refId, value) {
+async function selectOption(tabId, refId, value, deadline) {
   if (!tabId || !refId) {
     return { success: false, error: 'Tab ID and ref ID required' };
   }
@@ -616,7 +740,8 @@ async function selectOption(tabId, refId, value) {
     const result = await chrome.tabs.sendMessage(tabId, {
       type: 'SELECT_OPTION',
       refId,
-      value
+      value,
+      deadline,
     });
     
     return result;
@@ -657,27 +782,52 @@ async function navigateTab(tabId, url) {
   }
   
   try {
+    const loaded = waitForTabLoad(targetTabId);
     await chrome.tabs.update(targetTabId, { url });
-    
-    // Wait for page to load
-    await new Promise((resolve) => {
-      const listener = (updatedTabId, changeInfo) => {
-        if (updatedTabId === targetTabId && changeInfo.status === 'complete') {
-          chrome.tabs.onUpdated.removeListener(listener);
-          resolve();
-        }
-      };
-      chrome.tabs.onUpdated.addListener(listener);
-      setTimeout(() => {
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }, 30000);
-    });
-    
+    await loaded;
+
     return { success: true, tabId: targetTabId };
   } catch (err) {
     return { success: false, error: err.message };
   }
+}
+
+/**
+ * Resolve when the tab's page has loaded, or after `LOAD_WAIT_MS`.
+ *
+ * THE LISTENER USED TO BE ADDED AFTER THE NAVIGATION, so a page that finished loading
+ * in between (a fast local page, a cached one) never fired a 'complete' the listener could
+ * see, and every such `navigate` / `new_tab` sat out the full 30 s - exactly the desktop's
+ * own command timeout, so the desktop gave up first and reported "timed out" for a page
+ * that had loaded in under a second. Measured with a local page: 30 s per new tab.
+ *
+ * Now the listener is attached BEFORE the navigation starts (`navigateTab`), and for a tab
+ * whose navigation is already under way (`chrome.tabs.create`) the tab's current status is
+ * read after attaching, so a load that already completed resolves at once. 25 s, so the
+ * extension answers before the desktop's 30 s timeout ever fires.
+ */
+const LOAD_WAIT_MS = 25000;
+function waitForTabLoad(tabId, { alreadyStarted = false } = {}) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      chrome.tabs.onUpdated.removeListener(listener);
+      clearTimeout(timer);
+      resolve();
+    };
+    const listener = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') finish();
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    const timer = setTimeout(finish, LOAD_WAIT_MS);
+    if (alreadyStarted) {
+      chrome.tabs.get(tabId).then((tab) => {
+        if (tab.status === 'complete' && tab.url && tab.url !== 'about:blank') finish();
+      }).catch(finish);
+    }
+  });
 }
 
 /**
@@ -768,21 +918,7 @@ async function createBackgroundTab(url) {
     const groupId = await addTabToPilotGroup(tab.id);
     
     // Wait for page to load if URL provided
-    if (url) {
-      await new Promise((resolve) => {
-        const listener = (tabId, changeInfo) => {
-          if (tabId === tab.id && changeInfo.status === 'complete') {
-            chrome.tabs.onUpdated.removeListener(listener);
-            resolve();
-          }
-        };
-        chrome.tabs.onUpdated.addListener(listener);
-        setTimeout(() => {
-          chrome.tabs.onUpdated.removeListener(listener);
-          resolve();
-        }, 30000);
-      });
-    }
+    if (url) await waitForTabLoad(tab.id, { alreadyStarted: true });
     
     console.log('[Foxl] Created background tab:', tab.id, 'in group:', groupId);
     return { success: true, tabId: tab.id, groupId };
@@ -1170,6 +1306,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         break;
 
       case 'STOP_AGENT':
+        // Nothing queued before Stop runs afterwards (src/input-queue.js).
+        inputQueue.stop();
         sendToServer({ type: 'stop_agent' });
         await hideAgentIndicators(sender.tab?.id);
         sendResponse({ success: true });

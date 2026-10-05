@@ -106,7 +106,30 @@ const PERMISSION_API = {
  */
 const NO_API_SURFACE = new Set();
 
-const declared = new Set(manifest.permissions ?? []);
+/*
+ * `optional_permissions` count as declared, and are held to the same "used by the code"
+ * rule: an optional permission is still one a user is asked to grant.
+ */
+const optional = new Set(manifest.optional_permissions ?? []);
+const declared = new Set([...(manifest.permissions ?? []), ...optional]);
+
+/*
+ * PERMISSIONS CHROME REFUSES AS OPTIONAL never go in `optional_permissions`. Chrome lists
+ * them under "Permissions that can not be specified as optional"
+ * (developer.chrome.com/docs/extensions/reference/api/permissions), and Chromium enforces it
+ * (chrome_api_permissions.cc, kFlagCannotBeOptional): the manifest still LOADS, but
+ * `chrome.permissions.request` answers "Only permissions specified in the manifest may be
+ * requested." and the API stays undefined - a feature that cannot be turned on, behind a
+ * switch that looks like it can. A draft of 0.8.0 did exactly that with `debugger`, and its
+ * test run used a copy with `debugger` moved into `permissions`, which hid it. Measure the
+ * SHIPPED manifest.
+ */
+const CANNOT_BE_OPTIONAL = ['debugger', 'declarativeNetRequest', 'devtools', 'geolocation', 'mdns', 'proxy', 'tts', 'ttsEngine', 'wallpaper'];
+for (const perm of optional) {
+  if (CANNOT_BE_OPTIONAL.includes(perm)) {
+    fail(`"${perm}" is in optional_permissions, but Chrome refuses it as optional - chrome.permissions.request can never grant it. Declare it in "permissions" or drop it.`);
+  }
+}
 
 for (const perm of declared) {
   if (NO_API_SURFACE.has(perm)) continue;
@@ -122,7 +145,8 @@ for (const perm of declared) {
 
 /* Reverse direction: an API called without its permission fails at runtime. */
 const usedNamespaces = new Set([...allSource.matchAll(/chrome\.([a-zA-Z]+)\./g)].map((m) => m[1]));
-const NEEDS_NO_PERMISSION = new Set(['runtime', 'commands', 'i18n', 'extension']);
+// `permissions` is the API that asks for an optional permission; it needs none itself.
+const NEEDS_NO_PERMISSION = new Set(['runtime', 'commands', 'i18n', 'extension', 'permissions']);
 
 for (const ns of usedNamespaces) {
   if (NEEDS_NO_PERMISSION.has(ns)) continue;
@@ -219,5 +243,5 @@ if (failures.length) {
 }
 
 console.log(`audit ok: ${checked.join(', ')}`);
-console.log(`  permissions: ${[...declared].sort().join(', ')}`);
+console.log(`  permissions: ${[...declared].sort().map((p) => (optional.has(p) ? `${p} (optional)` : p)).join(', ')}`);
 console.log(`  chrome APIs: ${[...usedNamespaces].sort().join(', ')}`);

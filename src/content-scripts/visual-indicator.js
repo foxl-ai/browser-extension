@@ -258,6 +258,16 @@
 
   // Listen for messages from service worker
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    /*
+     * An input action carries its deadline (src/input-queue.js). A message that reaches the
+     * page after it - it waited behind a confirm() dialog or a hung script - is refused, not
+     * performed: by then Foxl Desktop has told the model the action failed, and doing it now
+     * would act behind the model's back (and twice, if it retried).
+     */
+    if (typeof message.deadline === 'number' && Date.now() > message.deadline) {
+      sendResponse({ success: false, nothingWasDone: true, error: 'This action reached the page after its deadline (the page was showing a dialog, or busy), so nothing was done. Take a snapshot to see the page.' });
+      return true;
+    }
     switch (message.type) {
       case 'SHOW_AGENT_INDICATORS':
         showIndicators();
@@ -310,6 +320,37 @@
         try {
           const result = window.__pilotSelectOption?.(message.refId, message.value);
           sendResponse(result || { success: false, error: 'Function not available' });
+        } catch (err) {
+          sendResponse({ success: false, error: err.message });
+        }
+        break;
+
+      /*
+       * The pieces the service worker composes into click / type / key / hover. Each
+       * answers a plain object, including how it acted (`method`).
+       */
+      case 'FOCUS_ELEMENT':
+      case 'ELEMENT_INFO':
+      case 'FOCUS_FOR_TYPING':
+      case 'READ_VALUE':
+      case 'INSERT_TEXT_FALLBACK':
+      case 'CLICK_FALLBACK':
+      case 'CLICK_AT_FALLBACK':
+      case 'HOVER_FALLBACK':
+      case 'KEY_FALLBACK':
+        try {
+          const fn = {
+            FOCUS_ELEMENT: () => window.__pilotFocusElement?.(message.refId),
+            ELEMENT_INFO: () => window.__pilotElementInfo?.(message.refId),
+            FOCUS_FOR_TYPING: () => window.__pilotFocusForTyping?.(message.refId),
+            READ_VALUE: () => window.__pilotReadValue?.(message.refId),
+            INSERT_TEXT_FALLBACK: () => window.__pilotInsertTextFallback?.(message.refId, message.text),
+            CLICK_FALLBACK: () => window.__pilotClickFallback?.(message.refId),
+            CLICK_AT_FALLBACK: () => window.__pilotClickAtFallback?.(message.x, message.y),
+            HOVER_FALLBACK: () => window.__pilotHoverFallback?.(message.refId, message.x, message.y),
+            KEY_FALLBACK: () => window.__pilotKeyFallback?.(message.key, message.refId),
+          }[message.type];
+          sendResponse(fn() || { success: false, error: 'Function not available' });
         } catch (err) {
           sendResponse({ success: false, error: err.message });
         }
