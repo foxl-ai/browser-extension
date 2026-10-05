@@ -8,6 +8,8 @@
  * - Tab management
  */
 
+import { createInputQueue } from './input-queue.js';
+
 // Configuration - try production port first, then dev
 const SERVER_PORTS = [13847, 3847];
 const DEFAULT_SERVER_URL = `http://localhost:${SERVER_PORTS[0]}`;
@@ -364,11 +366,15 @@ async function handleServerMessage(message) {
       break;
       
     case 'browser_command':
-      // Execute browser command and send result back. Input actions run one at a time
-      // (see oneInputAtATime); everything else stays concurrent.
-      const result = INPUT_ACTIONS.has(data?.action)
-        ? await oneInputAtATime(() => executeBrowserCommand(data))
-        : await executeBrowserCommand(data);
+      // Execute browser command and send result back. Input actions run one at a time PER
+      // TAB, each with a deadline (src/input-queue.js); everything else stays concurrent.
+      let result;
+      if (INPUT_ACTIONS.has(data?.action)) {
+        const tab = await resolveTargetTab(data.tabId);
+        result = await inputQueue.run(tab ?? 'no-tab', (deadline) => executeBrowserCommand({ ...data, tabId: tab ?? data.tabId, deadline }));
+      } else {
+        result = await executeBrowserCommand(data);
+      }
       if (requestId) {
         sendToServer({
           type: 'browser_result',
@@ -438,28 +444,20 @@ function broadcastTabContexts() {
 }
 
 /*
- * ONE INPUT AT A TIME. Clicks, typing, keys and hovers share the page's focus, as one
- * person's keyboard and mouse do. Foxl Desktop runs the tool calls a model makes in one
- * message CONCURRENTLY, and these commands are several page messages each, so they used to
- * interleave: measured with five such calls in one message (type into an editor, type into
- * a form field with Enter, click a checkbox, press Escape on a button, hover a menu), the
- * click took focus between the typing and its Enter, so the form never submitted and the
- * Escape never reached its button - and every answer said success. Reading the page, tabs
- * and navigation do not touch focus and stay concurrent.
+ * ONE INPUT AT A TIME, PER TAB, WITH A DEADLINE (src/input-queue.js has the measurements).
+ * Clicks, typing, keys and hovers on one tab share its focus, and Foxl Desktop runs a
+ * model's tool calls concurrently, so on one tab they are queued. A tab whose page is stuck
+ * (a confirm() dialog, a hung script) holds only its own queue, and only until the
+ * action's deadline; an action that could not start in time is refused, not run late.
  */
 const INPUT_ACTIONS = new Set(['click', 'type', 'select', 'click_at', 'press_key', 'hover']);
-let inputChain = Promise.resolve();
-function oneInputAtATime(run) {
-  const next = inputChain.then(run, run);
-  inputChain = next.then(() => {}, () => {});
-  return next;
-}
+const inputQueue = createInputQueue();
 
 /**
  * Execute browser command from server
  */
 async function executeBrowserCommand(command) {
-  const { action, tabId, params } = command;
+  const { action, tabId, params, deadline } = command;
   const targetTabId = await resolveTargetTab(tabId);
   
   try {
@@ -468,23 +466,23 @@ async function executeBrowserCommand(command) {
         return await getAccessibilityTree(targetTabId, params);
         
       case 'click':
-        return await clickElement(targetTabId, params.refId);
+        return await clickElement(targetTabId, params.refId, deadline);
 
       case 'type':
-        return await typeInElement(targetTabId, params.refId, params.text, params.submit);
+        return await typeInElement(targetTabId, params.refId, params.text, params.submit, deadline);
 
       // Added in 0.8.0: what a person does without an element ref (page events).
       case 'click_at':
-        return await clickAt(targetTabId, params?.x, params?.y);
+        return await clickAt(targetTabId, params?.x, params?.y, deadline);
 
       case 'press_key':
-        return await pressKey(targetTabId, params?.key, params?.refId);
+        return await pressKey(targetTabId, params?.key, params?.refId, deadline);
 
       case 'hover':
-        return await hoverElement(targetTabId, params?.refId, params?.x, params?.y);
+        return await hoverElement(targetTabId, params?.refId, params?.x, params?.y, deadline);
         
       case 'select':
-        return await selectOption(targetTabId, params.refId, params.value);
+        return await selectOption(targetTabId, params.refId, params.value, deadline);
         
       case 'navigate':
         return await navigateTab(targetTabId, params.url);
@@ -618,7 +616,7 @@ function valueHolds(value, text) {
 /**
  * Click element by ref ID
  */
-async function clickElement(tabId, refId) {
+async function clickElement(tabId, refId, deadline) {
   if (!tabId || !refId) {
     return { success: false, error: 'Tab ID and ref ID required' };
   }
@@ -628,10 +626,11 @@ async function clickElement(tabId, refId) {
     await chrome.tabs.sendMessage(tabId, {
       type: 'HIGHLIGHT_ELEMENT',
       refId,
-      duration: 500
+      duration: 500,
+      deadline,
     });
 
-    const result = await chrome.tabs.sendMessage(tabId, { type: 'CLICK_FALLBACK', refId });
+    const result = await chrome.tabs.sendMessage(tabId, { type: 'CLICK_FALLBACK', refId, deadline });
     return { ...(result || { success: false, error: 'No answer from the page' }), ref: refId };
   } catch (err) {
     return { success: false, error: err.message };
@@ -643,13 +642,13 @@ async function clickElement(tabId, refId) {
  * editing engine, READ IT BACK, then press Enter if asked and report whether the form
  * really submitted.
  */
-async function typeInElement(tabId, refId, text, submit = false) {
+async function typeInElement(tabId, refId, text, submit = false, deadline) {
   if (!tabId || !refId) {
     return { success: false, error: 'Tab ID and ref ID required' };
   }
 
   try {
-    const typed = await chrome.tabs.sendMessage(tabId, { type: 'INSERT_TEXT_FALLBACK', refId, text: String(text) });
+    const typed = await chrome.tabs.sendMessage(tabId, { type: 'INSERT_TEXT_FALLBACK', refId, text: String(text), deadline });
     if (!typed?.success) return typed || { success: false, error: `No answer from the page for ${refId}` };
     const method = typed.method;
 
@@ -672,7 +671,10 @@ async function typeInElement(tabId, refId, text, submit = false) {
       // was observed, and `enterHandledByPage` when the page took Enter itself (a chat
       // composer that sends on Enter calls preventDefault and has no form).
       // Enter goes to the field just typed into, not to whatever has focus now.
-      const key = await chrome.tabs.sendMessage(tabId, { type: 'KEY_FALLBACK', key: 'Enter', refId });
+      const key = await chrome.tabs.sendMessage(tabId, { type: 'KEY_FALLBACK', key: 'Enter', refId, deadline });
+      if (key?.nothingWasDone) {
+        return { success: false, method, ref: refId, nothingWasDone: true, error: `Typed into ${refId}, but Enter reached the page after its deadline and was not pressed: ${key.error}` };
+      }
       out.submitted = !!key?.submitted;
       if (key?.enterHandledByPage) out.enterHandledByPage = true;
       if (key?.invalid) out.invalid = key.invalid;
@@ -684,12 +686,12 @@ async function typeInElement(tabId, refId, text, submit = false) {
 }
 
 /** Click at a point of the page, in viewport CSS pixels (what a screenshot shows at 1x). */
-async function clickAt(tabId, x, y) {
+async function clickAt(tabId, x, y, deadline) {
   if (!tabId || !Number.isFinite(x) || !Number.isFinite(y)) {
     return { success: false, error: 'click_at needs a tab and numeric x, y (viewport CSS pixels)' };
   }
   try {
-    return await chrome.tabs.sendMessage(tabId, { type: 'CLICK_AT_FALLBACK', x, y });
+    return await chrome.tabs.sendMessage(tabId, { type: 'CLICK_AT_FALLBACK', x, y, deadline });
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -700,14 +702,14 @@ async function clickAt(tabId, x, y) {
  * on refId if given, which is FOCUSED first (not clicked: a click can toggle, submit or
  * navigate, which is not what pressing a key on an element asks for).
  */
-async function pressKey(tabId, key, refId) {
+async function pressKey(tabId, key, refId, deadline) {
   if (!tabId || !key) return { success: false, error: 'press_key needs a key, e.g. "Enter" or "Control+a"' };
   try {
     if (refId) {
-      const focus = await chrome.tabs.sendMessage(tabId, { type: 'FOCUS_ELEMENT', refId });
+      const focus = await chrome.tabs.sendMessage(tabId, { type: 'FOCUS_ELEMENT', refId, deadline });
       if (!focus?.success) return focus || { success: false, error: `No answer from the page for ${refId}` };
     }
-    const r = await chrome.tabs.sendMessage(tabId, { type: 'KEY_FALLBACK', key, refId });
+    const r = await chrome.tabs.sendMessage(tabId, { type: 'KEY_FALLBACK', key, refId, deadline });
     return { ...(r || { success: false, error: 'No answer from the page' }), key };
   } catch (err) {
     return { success: false, error: err.message };
@@ -715,12 +717,12 @@ async function pressKey(tabId, key, refId) {
 }
 
 /** Move the pointer over an element (refId) or a point (x, y) - menus that open on hover. */
-async function hoverElement(tabId, refId, x, y) {
+async function hoverElement(tabId, refId, x, y, deadline) {
   if (!tabId || (!refId && !(Number.isFinite(x) && Number.isFinite(y)))) {
     return { success: false, error: 'hover needs a refId or x, y' };
   }
   try {
-    return await chrome.tabs.sendMessage(tabId, { type: 'HOVER_FALLBACK', refId, x, y });
+    return await chrome.tabs.sendMessage(tabId, { type: 'HOVER_FALLBACK', refId, x, y, deadline });
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -729,7 +731,7 @@ async function hoverElement(tabId, refId, x, y) {
 /**
  * Select option in dropdown
  */
-async function selectOption(tabId, refId, value) {
+async function selectOption(tabId, refId, value, deadline) {
   if (!tabId || !refId) {
     return { success: false, error: 'Tab ID and ref ID required' };
   }
@@ -738,7 +740,8 @@ async function selectOption(tabId, refId, value) {
     const result = await chrome.tabs.sendMessage(tabId, {
       type: 'SELECT_OPTION',
       refId,
-      value
+      value,
+      deadline,
     });
     
     return result;
@@ -1303,6 +1306,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         break;
 
       case 'STOP_AGENT':
+        // Nothing queued before Stop runs afterwards (src/input-queue.js).
+        inputQueue.stop();
         sendToServer({ type: 'stop_agent' });
         await hideAgentIndicators(sender.tab?.id);
         sendResponse({ success: true });

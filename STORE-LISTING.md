@@ -91,7 +91,7 @@ re-verified rather than remembered. Every unused permission has been REMOVED -
 |---|---|
 | `sidePanel` | The extension's entire UI is a side panel. `chrome.sidePanel.setPanelBehavior` / `.open` in `src/service-worker.js`. |
 | `storage` | Stores the user's optional custom server URL and whether a desktop has ever been reachable (which is what lets the panel say "Foxl Desktop is required" instead of "disconnected"). `src/options.js`, `src/service-worker.js`. |
-| `scripting` | Injects the accessibility-tree reader and the visual activity indicator into the page the user asked Foxl to act on. `chrome.scripting.executeScript` in `src/service-worker.js`. |
+| `scripting` | Scrolls the page the user asked Foxl to act on (`chrome.scripting.executeScript` running `window.scrollBy` in `scrollPage`, `src/service-worker.js`). That is its only call site: the accessibility-tree reader and the activity indicator are declared `content_scripts` in `manifest.json` and are not injected through this API. |
 | `tabs` | Core of the product: create, query, update, activate and close tabs on the user's instruction. Many call sites in `src/service-worker.js`. |
 | `tabGroups` | Keeps the tabs Foxl opens in one dedicated group, so its work is visually separate from the user's own tabs. `chrome.tabGroups.get/query/update`. |
 | `alarms` | An MV3 service worker is evicted, and a `setTimeout` dies with it. Alarms carry the reconnect backoff and the health re-check so a dropped connection recovers without the user reopening the panel. |

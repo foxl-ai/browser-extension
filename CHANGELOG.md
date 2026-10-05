@@ -29,10 +29,14 @@ version pinned to the app's unified line; the split makes the two independent.
   skipped both and reloaded the page, so a React form's `onSubmit` never ran. The result
   now says whether a submit actually happened, or that the form is invalid, or that the
   page handled Enter itself.
-- **Clicks, typing, key presses and hovers run one at a time**, the way one keyboard and
-  mouse would. Foxl Desktop can send several at once, and they shared the page's focus, so
-  a click could land between typing and its Enter and the Enter went to the wrong element.
-  Enter after typing, and a key pressed on an element, now go to that element.
+- **Clicks, typing, key presses and hovers on a tab run one at a time**, the way one
+  keyboard and mouse would. Foxl Desktop can send several at once, and they shared the
+  page's focus, so a click could land between typing and its Enter and the Enter went to
+  the wrong element. Enter after typing, and a key pressed on an element, now go to that
+  element. A tab whose page stops answering (a button that opens a confirm dialog, a hung
+  script) holds only its own actions, and for at most 25 seconds: an action that could not
+  start in time, or that reaches the page after that, is refused with "nothing was done"
+  instead of running later. Stop Foxl cancels the actions still waiting.
 - **Clicks send the whole mouse sequence** (pointer and mouse over, down and up, then
   click), for sites that act on mousedown. An element with no box on the page (a hidden
   checkbox behind a styled label) is still clicked the way it was before.
@@ -41,6 +45,12 @@ version pinned to the app's unified line; the split makes the two independent.
 - **Opening a page no longer waits 30 seconds** when the page finished loading before the
   extension started watching for it, which made fast pages time out in Foxl Desktop.
 - Foxl's own "Stop Foxl" button no longer appears in the page outline.
+- **The full page outline of a very large page is fast.** Each element's ref was found by
+  scanning every ref so far, so a page with 18,000 controls took 21 seconds (37 seconds the
+  second time, past Foxl Desktop's 30-second limit). It takes under 50 ms now.
+- PRIVACY.md says when the activity border and the Stop Foxl button appear (only when
+  Foxl Desktop signals a run), and the store listing and README say what `scripting` is
+  used for (scrolling).
 
 ### Known limits
 

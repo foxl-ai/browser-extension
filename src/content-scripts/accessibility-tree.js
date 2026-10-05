@@ -15,6 +15,10 @@
   // Initialize global state
   window.__pilotElementMap = window.__pilotElementMap || {};
   window.__pilotRefCounter = window.__pilotRefCounter || 0;
+  // element -> its ref, so a tree build finds an element's ref in one lookup. It used to scan
+  // every ref for every element: quadratic, so a full tree of a page with 18,000 controls took
+  // 21 s, and 38 s the second time - past Foxl Desktop's 30 s command timeout.
+  window.__pilotRefOf = window.__pilotRefOf || new WeakMap();
 
   /**
    * The element a person types into on a rich-text editor: the OUTERMOST contenteditable.
@@ -279,16 +283,12 @@
       const name = getAccessibleName(element);
 
       // Find or create ref ID
-      let refId = null;
-      for (const [id, ref] of Object.entries(window.__pilotElementMap)) {
-        if (ref.deref() === element) {
-          refId = id;
-          break;
-        }
-      }
+      let refId = window.__pilotRefOf.get(element) || null;
+      if (refId && window.__pilotElementMap[refId]?.deref() !== element) refId = null;
       if (!refId) {
         refId = 'ref_' + (++window.__pilotRefCounter);
         window.__pilotElementMap[refId] = new WeakRef(element);
+        window.__pilotRefOf.set(element, refId);
       }
 
       // Build line
