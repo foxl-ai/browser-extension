@@ -8,17 +8,6 @@
  * - Tab management
  */
 
-import {
-  detachAll as detachTrustedInput,
-  parseKeySpec,
-  trustedClick,
-  trustedHover,
-  trustedInputAvailable,
-  trustedInsertText,
-  trustedKey,
-  trustedScreenshot,
-} from './trusted-input.js';
-
 // Configuration - try production port first, then dev
 const SERVER_PORTS = [13847, 3847];
 const DEFAULT_SERVER_URL = `http://localhost:${SERVER_PORTS[0]}`;
@@ -392,9 +381,6 @@ async function handleServerMessage(message) {
       
     case 'hide_indicators':
       await hideAgentIndicators(data?.tabId);
-      // The run is over: end the debugger session too, so Chrome's "started debugging
-      // this browser" bar goes away with the overlay instead of after its idle timeout.
-      await detachTrustedInput().catch(() => {});
       break;
 
     default:
@@ -466,7 +452,7 @@ async function executeBrowserCommand(command) {
       case 'type':
         return await typeInElement(targetTabId, params.refId, params.text, params.submit);
 
-      // Added with trusted input: what a person does without an element ref.
+      // Added in 0.8.0: what a person does without an element ref (page events).
       case 'click_at':
         return await clickAt(targetTabId, params?.x, params?.y);
 
@@ -580,22 +566,32 @@ async function getAccessibilityTree(tabId, params = {}) {
 }
 
 /*
- * CLICK, TYPE, KEYS AND HOVER: trusted when the user granted `debugger`, the improved
- * synthetic fallback otherwise - and every answer says which (`method`), because the two
- * are not equally reliable and the agent should know what it did.
+ * CLICK, TYPE, KEYS AND HOVER, and what each one really did.
  *
  * The old path was `element.click()`, `element.value = text` plus two plain Events, and
- * `form.submit()`, and it answered `{ success: true }` whatever the page did with them. A
- * React-controlled input put its old value back on the next render, a contenteditable
- * editor ignored `.value` entirely, and the agent was told it had worked. Typing is now
- * READ BACK and reported as a failure when the text is not in the field.
+ * `form.submit()`, and it answered `{ success: true }` whatever the page did with them: a
+ * contenteditable editor ignored `.value` entirely, Enter skipped the page's own submit
+ * handling (and reloaded a React form), and the agent was told it had worked. Typing is now
+ * READ BACK and reported as a failure when the text is not in the field, and every answer
+ * names how it acted (`method`).
+ *
+ * All of this is page events from the content script. Trusted input (chrome.debugger) is
+ * NOT here: Chrome refuses `debugger` as an optional permission, and as a required one it
+ * would bypass the user's per-site access settings ("On click" sites become readable).
  */
 
-/** The text the field holds contains what was typed (whitespace-insensitive, as editors reflow it). */
+/**
+ * Does the field hold what was typed? Whitespace-insensitive (editors reflow it, and `\s`
+ * also matches their no-break spaces), and also on LETTERS AND DIGITS ONLY, case-insensitive,
+ * so a masked input that formats as you type (5551234567 -> "(555) 123-4567") is not
+ * reported as a failure.
+ */
 function valueHolds(value, text) {
-  // `\s` also matches the no-break spaces contenteditable editors put between words.
-  const norm = (s) => String(s ?? '').replace(/\s+/g, '');
-  return norm(value).includes(norm(text));
+  const squash = (s) => String(s ?? '').replace(/\s+/g, '');
+  if (squash(value).includes(squash(text))) return true;
+  const alnum = (s) => String(s ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  const want = alnum(text);
+  return want.length > 0 && alnum(value).includes(want);
 }
 
 /**
@@ -614,17 +610,6 @@ async function clickElement(tabId, refId) {
       duration: 500
     });
 
-    if (await trustedInputAvailable()) {
-      const info = await chrome.tabs.sendMessage(tabId, { type: 'ELEMENT_INFO', refId });
-      if (!info?.success) return info || { success: false, error: `No answer from the page for ${refId}` };
-      // A real click lands on whatever is on top. Clicking through a banner would report
-      // success for a click the target never received.
-      if (!info.hitsTarget) {
-        return { success: false, error: `${refId} is covered by ${info.covering} at its center. Close or scroll past that first, or use click_at.` };
-      }
-      await trustedClick(tabId, info.x, info.y);
-      return { success: true, method: 'trusted', ref: refId };
-    }
     const result = await chrome.tabs.sendMessage(tabId, { type: 'CLICK_FALLBACK', refId });
     return { ...(result || { success: false, error: 'No answer from the page' }), ref: refId };
   } catch (err) {
@@ -633,9 +618,9 @@ async function clickElement(tabId, refId) {
 }
 
 /**
- * Type into element: focus it and select its contents, insert the text (trusted:
- * CDP Input.insertText; fallback: the editing engine), READ IT BACK, then press Enter if
- * asked (trusted: a real key; fallback: keydown + requestSubmit).
+ * Type into element: focus it and select its contents, insert the text through the
+ * editing engine, READ IT BACK, then press Enter if asked and report whether the form
+ * really submitted.
  */
 async function typeInElement(tabId, refId, text, submit = false) {
   if (!tabId || !refId) {
@@ -643,18 +628,9 @@ async function typeInElement(tabId, refId, text, submit = false) {
   }
 
   try {
-    const trusted = await trustedInputAvailable();
-    let method;
-    if (trusted) {
-      const prep = await chrome.tabs.sendMessage(tabId, { type: 'FOCUS_FOR_TYPING', refId });
-      if (!prep?.success) return prep || { success: false, error: `No answer from the page for ${refId}` };
-      await trustedInsertText(tabId, String(text));
-      method = 'trusted';
-    } else {
-      const typed = await chrome.tabs.sendMessage(tabId, { type: 'INSERT_TEXT_FALLBACK', refId, text: String(text) });
-      if (!typed?.success) return typed || { success: false, error: `No answer from the page for ${refId}` };
-      method = typed.method;
-    }
+    const typed = await chrome.tabs.sendMessage(tabId, { type: 'INSERT_TEXT_FALLBACK', refId, text: String(text) });
+    if (!typed?.success) return typed || { success: false, error: `No answer from the page for ${refId}` };
+    const method = typed.method;
 
     const read = await chrome.tabs.sendMessage(tabId, { type: 'READ_VALUE', refId });
     if (!read?.success) return read || { success: false, error: `Could not read ${refId} back` };
@@ -669,13 +645,17 @@ async function typeInElement(tabId, refId, text, submit = false) {
       return { success: false, method, error: `Typed into ${refId}, but the password field holds only ${read.length} characters.` };
     }
 
-    let submitted = false;
+    const out = { success: true, method, ref: refId, verified: true, submitted: false };
     if (submit) {
-      if (trusted) await trustedKey(tabId, 'Enter');
-      else await chrome.tabs.sendMessage(tabId, { type: 'KEY_FALLBACK', key: 'Enter' });
-      submitted = true;
+      // What happened, not what was asked: `submitted` is true only when a submit event
+      // was observed, and `enterHandledByPage` when the page took Enter itself (a chat
+      // composer that sends on Enter calls preventDefault and has no form).
+      const key = await chrome.tabs.sendMessage(tabId, { type: 'KEY_FALLBACK', key: 'Enter' });
+      out.submitted = !!key?.submitted;
+      if (key?.enterHandledByPage) out.enterHandledByPage = true;
+      if (key?.invalid) out.invalid = key.invalid;
     }
-    return { success: true, method, ref: refId, verified: true, submitted };
+    return out;
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -687,33 +667,26 @@ async function clickAt(tabId, x, y) {
     return { success: false, error: 'click_at needs a tab and numeric x, y (viewport CSS pixels)' };
   }
   try {
-    if (await trustedInputAvailable()) {
-      await trustedClick(tabId, x, y);
-      return { success: true, method: 'trusted', x, y };
-    }
     return await chrome.tabs.sendMessage(tabId, { type: 'CLICK_AT_FALLBACK', x, y });
   } catch (err) {
     return { success: false, error: err.message };
   }
 }
 
-/** Press a key ("Enter", "Escape", "Tab", "ArrowDown", "Control+a") - on refId if given. */
+/**
+ * Press a key ("Enter", "Escape", "Tab", "ArrowDown", "Control+a") on whatever has focus -
+ * on refId if given, which is FOCUSED first (not clicked: a click can toggle, submit or
+ * navigate, which is not what pressing a key on an element asks for).
+ */
 async function pressKey(tabId, key, refId) {
   if (!tabId || !key) return { success: false, error: 'press_key needs a key, e.g. "Enter" or "Control+a"' };
-  if (!parseKeySpec(key)) return { success: false, error: `Unknown key "${key}"` };
   try {
     if (refId) {
-      const focus = await chrome.tabs.sendMessage(tabId, { type: 'ELEMENT_INFO', refId });
+      const focus = await chrome.tabs.sendMessage(tabId, { type: 'FOCUS_ELEMENT', refId });
       if (!focus?.success) return focus || { success: false, error: `No answer from the page for ${refId}` };
-      if (await trustedInputAvailable()) await trustedClick(tabId, focus.x, focus.y);
-      else await chrome.tabs.sendMessage(tabId, { type: 'CLICK_FALLBACK', refId });
     }
-    if (await trustedInputAvailable()) {
-      await trustedKey(tabId, key);
-      return { success: true, method: 'trusted', key };
-    }
-    const r = await chrome.tabs.sendMessage(tabId, { type: 'KEY_FALLBACK', key: parseKeySpec(key).key });
-    return { ...(r || { success: false }), key };
+    const r = await chrome.tabs.sendMessage(tabId, { type: 'KEY_FALLBACK', key });
+    return { ...(r || { success: false, error: 'No answer from the page' }), key };
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -725,18 +698,6 @@ async function hoverElement(tabId, refId, x, y) {
     return { success: false, error: 'hover needs a refId or x, y' };
   }
   try {
-    if (await trustedInputAvailable()) {
-      let px = x;
-      let py = y;
-      if (refId) {
-        const info = await chrome.tabs.sendMessage(tabId, { type: 'ELEMENT_INFO', refId });
-        if (!info?.success) return info || { success: false, error: `No answer from the page for ${refId}` };
-        px = info.x;
-        py = info.y;
-      }
-      await trustedHover(tabId, px, py);
-      return { success: true, method: 'trusted', x: px, y: py };
-    }
     return await chrome.tabs.sendMessage(tabId, { type: 'HOVER_FALLBACK', refId, x, y });
   } catch (err) {
     return { success: false, error: err.message };
@@ -1073,18 +1034,6 @@ async function takeScreenshot(tabId) {
     if (!tabId) {
       const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
       return { success: true, dataUrl };
-    }
-
-    // With the debugger permission the agent's tab is captured WHERE IT IS, so the user's
-    // own tab is not switched away and back for every screenshot (captureVisibleTab below
-    // only sees the visible tab). Any failure falls through to the old path.
-    if (await trustedInputAvailable()) {
-      try {
-        const dataUrl = await trustedScreenshot(tabId);
-        return { success: true, dataUrl, tabId, method: 'trusted' };
-      } catch (err) {
-        console.warn('[Foxl] debugger screenshot failed, capturing the visible tab instead:', err?.message);
-      }
     }
 
     const dataUrl = await withActiveTab(tabId, async (_tid, windowId) => {

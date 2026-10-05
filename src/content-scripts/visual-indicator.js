@@ -316,10 +316,10 @@
         break;
 
       /*
-       * The pieces the service worker composes into trusted input (src/trusted-input.js)
-       * or, without the debugger permission, into the improved synthetic fallback. Each
-       * answers a plain object; the worker decides the path and reports which one it took.
+       * The pieces the service worker composes into click / type / key / hover. Each
+       * answers a plain object, including how it acted (`method`).
        */
+      case 'FOCUS_ELEMENT':
       case 'ELEMENT_INFO':
       case 'FOCUS_FOR_TYPING':
       case 'READ_VALUE':
@@ -330,6 +330,7 @@
       case 'KEY_FALLBACK':
         try {
           const fn = {
+            FOCUS_ELEMENT: () => window.__pilotFocusElement?.(message.refId),
             ELEMENT_INFO: () => window.__pilotElementInfo?.(message.refId),
             FOCUS_FOR_TYPING: () => window.__pilotFocusForTyping?.(message.refId),
             READ_VALUE: () => window.__pilotReadValue?.(message.refId),

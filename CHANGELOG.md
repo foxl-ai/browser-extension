@@ -10,31 +10,39 @@ version pinned to the app's unified line; the split makes the two independent.
 
 ### Added
 
-- **Trusted input (optional).** Turn it on in the extension's options and Chrome asks
-  once for the `debugger` permission. Foxl then clicks, types and presses keys the way
-  your mouse and keyboard do, so rich-text editors (Gmail, Slack, Notion) and React forms
-  take what it types, and it can screenshot its own tab without switching away from
-  yours. Chrome shows "Foxl started debugging this browser" while a task runs; the bar
-  goes away when the task ends.
-- New actions for the agent: click at a point, press a key (Enter, Escape, Tab, arrows,
-  combinations like Control+a), and hover.
+- New actions for the agent: click at a point of the page, press a key (Enter, Escape,
+  Tab, arrows, or a combination like Control+a), and hover over an element or a point.
+  Pressing a key on an element focuses it first; it does not click it.
 
 ### Fixed
 
 - **Typing is checked, and a failure is reported.** After typing, the extension reads the
   field back and says so when the text is not there. It used to answer "done" for every
-  type, including into fields that ignored it.
-- **Typing works in more places without trusted input.** Text goes in through the
-  browser's own editing, which React-controlled inputs and contenteditable editors accept.
-  It used to set the value directly, which React put back and editors ignored. Enter
-  submits through the page's own submit handling (`requestSubmit`) instead of skipping it.
-- **Clicks send the whole mouse sequence** (pointer and mouse down and up, then click),
-  for sites that act on mousedown.
+  type, including into fields that ignored it. A field that formats what you type (a phone
+  number shown as "(555) 123-4567") counts as holding it.
+- **Typing into rich-text editors works.** Text goes in through the browser's own editing
+  (`insertText`), which contenteditable editors accept. The old path set `.value`, which
+  an editor does not have, so nothing was typed. Plain and React-controlled inputs already
+  took the old path's text and still do.
+- **Enter submits through the page's own submit handling.** It calls `requestSubmit()`,
+  so the page's submit handler and the form's validation run. The old `form.submit()`
+  skipped both and reloaded the page, so a React form's `onSubmit` never ran. The result
+  now says whether a submit actually happened, or that the form is invalid, or that the
+  page handled Enter itself.
+- **Clicks send the whole mouse sequence** (pointer and mouse over, down and up, then
+  click), for sites that act on mousedown. An element with no box on the page (a hidden
+  checkbox behind a styled label) is still clicked the way it was before.
 - **Elements inside web components (open shadow roots) appear in the page outline** and
   can be clicked and typed into. Editors (contenteditable) are listed as text boxes.
 - **Opening a page no longer waits 30 seconds** when the page finished loading before the
   extension started watching for it, which made fast pages time out in Foxl Desktop.
 - Foxl's own "Stop Foxl" button no longer appears in the page outline.
+
+### Known limits
+
+- Clicks, key presses and hovers are still page events, not your real mouse and
+  keyboard. A key the browser itself acts on (Tab moving focus) does not happen, and a
+  site that checks whether input came from a person ignores them.
 
 ## v0.7.1 - August 18, 2026
 
