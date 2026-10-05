@@ -19,6 +19,9 @@
   // every ref for every element: quadratic, so a full tree of a page with 18,000 controls took
   // 21 s, and 38 s the second time - past Foxl Desktop's 30 s command timeout.
   window.__pilotRefOf = window.__pilotRefOf || new WeakMap();
+  // Foxl's own overlay nodes, recorded by visual-indicator.js in THIS isolated world, where a
+  // page cannot add to it (see there). The only test of "is this Foxl's UI".
+  window.__foxlOwnNodes = window.__foxlOwnNodes || new WeakSet();
 
   /**
    * The element a person types into on a rich-text editor: the OUTERMOST contenteditable.
@@ -273,7 +276,7 @@
     // Foxl's own overlay (visual-indicator.js: the glow border and the "Stop Foxl" button)
     // is not part of the page. Listed, it was an unlabeled button the agent could click to
     // stop itself.
-    if ((element.id && element.id.startsWith('pilot-agent-')) || element.hasAttribute('data-foxl-ui')) return;
+    if (isFoxlUi(element)) return;
 
     const include = shouldInclude(element, options) || 
                    (options.refId !== null && depth === 0);
@@ -444,16 +447,13 @@
 
   /** The deepest element at a viewport point, looking through open shadow roots. */
   /**
-   * Is this node part of Foxl's own overlay (visual-indicator.js: the glow border, the
-   * "Stop Foxl" button and its container, the click highlight)? Those carry an id starting
-   * `pilot-agent-` or a `data-foxl-ui` attribute, on themselves or an ancestor.
+   * Is this node one of Foxl's own overlay nodes (visual-indicator.js: the glow border, the
+   * "Stop Foxl" button, its container and contents, a click highlight)? Membership in the
+   * isolated-world set only - never an id prefix or an attribute, which a page can copy onto
+   * its own nodes to hide them from the outline or to redirect a click_at.
    */
   function isFoxlUi(node) {
-    for (let n = node; n; n = n.parentElement || (n.getRootNode?.() instanceof ShadowRoot ? n.getRootNode().host : null)) {
-      if (typeof n.id === 'string' && n.id.startsWith('pilot-agent-')) return true;
-      if (n.hasAttribute?.('data-foxl-ui')) return true;
-    }
-    return false;
+    return !!node && window.__foxlOwnNodes.has(node);
   }
 
   /** The topmost element at a point in `root` that is the PAGE's, skipping Foxl's overlay. */

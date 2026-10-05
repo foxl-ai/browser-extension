@@ -1063,10 +1063,14 @@ async function takeScreenshot(tabId) {
 
     const dataUrl = await withActiveTab(tabId, async (_tid, windowId) => {
       // Foxl's own overlay is not part of the page: hidden for the capture (never longer than
-      // 500 ms of waiting on a page that does not answer, e.g. one showing a dialog).
+      // 500 ms of waiting on a page that does not answer, e.g. one showing a dialog). The hide
+      // carries the same 500 ms as a deadline, so a page that frees up later REFUSES it rather
+      // than hiding the user's Stop button with no restore coming; the page also undoes a
+      // hide by itself after 1.5 s.
+      const HIDE_WAIT_MS = 500;
       const hidden = await Promise.race([
-        chrome.tabs.sendMessage(tabId, { type: 'SET_OVERLAY_HIDDEN', hidden: true }).then(() => true, () => false),
-        new Promise((r) => setTimeout(() => r(false), 500)),
+        chrome.tabs.sendMessage(tabId, { type: 'SET_OVERLAY_HIDDEN', hidden: true, deadline: Date.now() + HIDE_WAIT_MS }).then((r) => r?.success === true, () => false),
+        new Promise((r) => setTimeout(() => r(false), HIDE_WAIT_MS)),
       ]);
       try {
         return await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
