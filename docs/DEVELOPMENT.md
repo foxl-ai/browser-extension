@@ -24,6 +24,50 @@ Use these debugging surfaces:
 
 The server URL defaults to the desktop app's local ports. A custom server URL is persisted in `chrome.storage.local`; clear it in the options page to return to discovery.
 
+## Background capture and snapshot protocol (0.9)
+
+The desktop still sends a `browser_command` with `requestId` and `data: { action, tabId, params }`.
+The matching `browser_result` carries the same ID and a `data.success` result.
+
+| Action | Parameters | Result |
+| :--- | :--- | :--- |
+| `screenshot` | No params for viewport; `clip: { x, y, width, height }` in viewport CSS pixels, or `fullPage: true` | PNG `dataUrl`, `captureMethod: "cdp"`, CSS `viewport` and `captureRect`, actual pixel `image: { width, height }`, document ID |
+| `get_accessibility_tree` | `snapshot: true`; optional `since`, `filter`, `depth`, `maxChars`, `maxLines` | `snapshotId`, `mode: "full" / "diff"`, text, URL/title/viewport, explicit truncation |
+| `scroll` | Existing direction and amount | Actual scroll position, without selecting the tab |
+
+Capture supports HTTP(S) pages and attaches only to the requested tab. It checks the site-access grant using
+`scripting.executeScript`, hides its own overlay, and detaches even on failure.
+A debugger conflict, discarded tab, inaccessible page, navigation during capture,
+or deadline produces a failure; none activates a tab as a fallback. Chrome's
+debugging notice can appear. Crops must fit the viewport; full-page captures are
+limited to 16,384 CSS pixels per dimension and 32 million CSS pixels.
+
+The capture's pixel size can differ from both CSS size and `devicePixelRatio`.
+If the desktop resizes an image to `W x H`, map image coordinates to viewport CSS
+as `x = captureRect.x + imageX * captureRect.width / W` (and likewise for y).
+Full-page coordinates outside the viewport require a scroll and fresh observation.
+
+Snapshot defaults are `filter: "visible"`, `depth: 15`, `maxChars: 12000`, and
+`maxLines: 200`. Send `since` only for an ID whose text is still in the caller's
+context. A diff names `baseSnapshotId` and uses one-based line replacements;
+no changes returns `(no changes)`. Another tab or document, changed options,
+missing/expired baselines, and an uneconomical diff return full text.
+Legacy requests without `snapshot: true` retain their existing response shape.
+Old extensions ignore the added snapshot parameters, so desktops must accept
+legacy full responses. Region and full-page requests require a 0.9 extension.
+
+Clicks, keys, typing, and hover still use the existing synthetic input queue.
+The debugger capture path is not an arbitrary browser-debugging bridge.
+
+For maintainers with a desktop source checkout, its
+`foxl/scripts/probe-browser-extension-parity.mjs` loads this real extension in
+a temporary Chrome for Testing profile and runs the real desktop tool callback
+against a local fixture. It records protocol metadata, page input events, pixels,
+tab activation, snapshot differences, and failures after Chrome withholds site
+access. Run it with `--extension /absolute/path/to/this/checkout --headed`.
+The fixture proxy rejects other destinations, including installed Foxl discovery
+ports. The probe changes no installed extension or real desktop data.
+
 ## Audit and build
 
 With Node.js 20 or newer:

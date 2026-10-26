@@ -6,6 +6,26 @@ This extension has its own version line, independent of the Foxl Desktop release
 number. It used to ship inside the Foxl monorepo, where a script kept its manifest
 version pinned to the app's unified line; the split makes the two independent.
 
+## v0.9.0 (unreleased)
+
+### Added
+
+- Capture a requested tab without selecting it, using Chrome's debugger API. Screenshots can cover the viewport, a rectangle within it, or the full document, and report their CSS rectangle and actual PNG dimensions.
+- With a compatible desktop, page snapshots can return only changes since an explicitly supplied snapshot ID. Limits on text and lines report truncation; a different tab, document, filter, expired baseline, or missing baseline returns a full snapshot.
+- Snapshots include current field values and checked, disabled, expanded, and selected states. Password input values are omitted from both field values and accessible-name fallbacks.
+
+### Fixed
+
+- Scrolling no longer selects the target tab or waits for a smooth animation before guessing whether it finished. It scrolls immediately and reports the resulting position.
+- Screenshot requests on one tab run in order and detach their debugger when finished. Invalid crops and a page that navigates during capture are refused.
+- Snapshot and page-access failures reach the desktop as failures.
+
+### Permissions and limits
+
+- Adds the required `debugger` permission. Chrome does not support making it optional. Capture checks the existing site-access grant before attaching and again before returning pixels; it does not fall back to activating the tab. Chrome can display a debugging notice.
+- Clicks, typing, keys, and hover still use the existing page-event implementation. Adding `debugger` for screenshots does not make those events trusted.
+- Updated the README, privacy details, and store permission explanations for capture and the temporary snapshot cache.
+
 ## v0.8.1 - October 5, 2026
 
 ### Fixed

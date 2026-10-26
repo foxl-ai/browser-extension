@@ -141,7 +141,7 @@
       if (inputType === 'submit' && value?.trim()) {
         return value.trim();
       }
-      if (element.value && element.value.length < 50 && element.value.trim()) {
+      if (inputType !== 'password' && element.value && element.value.length < 50 && element.value.trim()) {
         return element.value.trim();
       }
     }
@@ -311,6 +311,18 @@
       }
       if (element.getAttribute('placeholder')) {
         line += ` placeholder="${element.getAttribute('placeholder')}"`;
+      }
+      if ((element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
+        && element.type !== 'password' && !['checkbox', 'radio', 'file', 'submit', 'button'].includes(element.type)) {
+        line += ` value="${element.value.replace(/\s+/g, ' ').slice(0, 200).replace(/"/g, '\\"')}"`;
+      }
+      if (element instanceof HTMLInputElement && ['checkbox', 'radio'].includes(element.type)) {
+        line += ` checked=${element.checked}`;
+      }
+      if (element.disabled || element.getAttribute('aria-disabled') === 'true') line += ' disabled';
+      for (const state of ['expanded', 'selected', 'checked']) {
+        const value = element.getAttribute(`aria-${state}`);
+        if (value !== null) line += ` ${state}=${JSON.stringify(value)}`;
       }
 
       output.push(line);
