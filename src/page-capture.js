@@ -1,6 +1,15 @@
 /**
  * Capture the named tab's renderer without selecting it.
  *
+ * Only a tab in the BACKGROUND goes through the debugger. The selected tab of its window is
+ * captured with chrome.tabs.captureVisibleTab, as 0.8.1 did: attaching shows Chrome's
+ * "started debugging this browser" bar in every tab of every window, which shrinks the page
+ * being captured while the capture runs (measured on Chrome 156: 757 -> 700 CSS px over
+ * ~130 ms, so a selected-tab capture reported a 757 px viewport for a page drawn at ~730).
+ * Where Chrome refuses the debugger (DevTools disabled by policy, a page embedding another
+ * extension's frame, an existing session) or cannot draw a background tab (a PDF), a
+ * viewport capture falls back to 0.8.1's select-capture-restore instead of failing.
+ *
  * Chrome's debugger permission is required, not optional:
  * developer.chrome.com/docs/extensions/reference/api/permissions
  * It does NOT enforce the person's per-site extension access. Each capture therefore
@@ -18,6 +27,7 @@ const PROTOCOL_VERSION = '1.3';
 /** A real scripting call checks Chrome's current host grant, including withheld sites. */
 export async function readAllowedPage(tabId, reader = () => ({
   url: location.href,
+  contentType: document.contentType,
   viewport: { width: innerWidth, height: innerHeight, devicePixelRatio },
 }), args = []) {
   let timer;
@@ -35,7 +45,8 @@ export async function readAllowedPage(tabId, reader = () => ({
       }),
     ]);
   } finally { clearTimeout(timer); }
-  if (!page?.documentId || !page.result || !/^https?:\/\//.test(page.result.url)) {
+  // file: too: scripting itself refuses it unless "Allow access to file URLs" is on.
+  if (!page?.documentId || !page.result || !/^(https?:\/\/|file:)/.test(page.result.url)) {
     throw new Error('Foxl needs access to this web page before it can read or capture it.');
   }
   return { ...page.result, documentId: page.documentId };
@@ -54,6 +65,73 @@ function pngDimensions(data) {
     throw new Error('Chrome did not return a PNG screenshot.');
   }
   return { width: view.getUint32(16), height: view.getUint32(20) };
+}
+
+const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+/** Hide Foxl's own overlay for a capture; true when the page confirmed it. */
+function hideOverlay(tabId, deadline, timers, documentId) {
+  const hideDeadline = Math.min(deadline, Date.now() + 500);
+  return Promise.race([
+    chrome.tabs.sendMessage(tabId, { type: 'SET_OVERLAY_HIDDEN', hidden: true, deadline: hideDeadline },
+      documentId ? { documentId } : { frameId: 0 }).then((r) => r?.success === true, () => false),
+    new Promise((resolve) => {
+      const timer = setTimeout(() => { timers.delete(timer); resolve(false); }, 500);
+      timers.add(timer);
+    }),
+  ]);
+}
+
+function showOverlay(tabId, documentId) {
+  chrome.tabs.sendMessage(tabId, { type: 'SET_OVERLAY_HIDDEN', hidden: false },
+    documentId ? { documentId } : { frameId: 0 }).catch(() => {});
+}
+
+/** A discarded tab is reloaded in the background (0.8.1 reloaded it by selecting it). */
+async function reloadDiscarded(tabId) {
+  const loaded = new Promise((resolve) => {
+    const listener = (id, change) => {
+      if (id === tabId && change.status === 'complete') { chrome.tabs.onUpdated.removeListener(listener); resolve(); }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+  await chrome.tabs.reload(tabId);
+  await loaded;
+  return chrome.tabs.get(tabId);
+}
+
+/**
+ * The pixels of the selected tab of `tab.windowId`, the way 0.8.1 took them. captureVisibleTab
+ * enforces the site-access grant itself. `select` first selects the tab and restores the
+ * previous one afterwards (0.8.1's withActiveTab), only for the fallbacks named above.
+ */
+async function captureVisible(tab, timers, deadline, select) {
+  let previous = null;
+  if (select) {
+    [previous] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+    await chrome.tabs.update(tab.id, { active: true });
+    await sleep(150);
+  }
+  let hidden = false;
+  try {
+    hidden = await hideOverlay(tab.id, deadline, timers);
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    const now = await chrome.tabs.get(tab.id);
+    if (!now.active || now.windowId !== tab.windowId) {
+      throw new Error('Another tab was selected during the screenshot. Take a new screenshot.');
+    }
+    const page = await readAllowedPage(tab.id);
+    const viewport = { width: page.viewport.width, height: page.viewport.height };
+    return {
+      success: true, tabId: tab.id, documentId: page.documentId,
+      captureMethod: select ? 'select-tab' : 'visible-tab',
+      viewport, captureRect: { x: 0, y: 0, ...viewport },
+      image: pngDimensions(dataUrl.slice(dataUrl.indexOf(',') + 1)), fullPage: false, dataUrl,
+    };
+  } finally {
+    if (hidden) showOverlay(tab.id);
+    if (previous?.id && previous.id !== tab.id) await chrome.tabs.update(previous.id, { active: true }).catch(() => {});
+  }
 }
 
 async function capture(tabId, options, deadline) {
@@ -79,15 +157,26 @@ async function capture(tabId, options, deadline) {
     } finally { clearTimeout(timer); timers.delete(timer); }
   };
   try {
-    const tab = await bounded(() => chrome.tabs.get(tabId));
-    if (tab.discarded) throw new Error('The target tab is discarded. Open it before taking a screenshot.');
+    let tab = await bounded(() => chrome.tabs.get(tabId));
+    if (tab.discarded) tab = await bounded(() => reloadDiscarded(tabId));
+    const viewportOnly = !options.clip && !options.fullPage;
+    if (tab.active && viewportOnly) return await bounded(() => captureVisible(tab, timers, deadline, false));
     before = await bounded(() => readAllowedPage(tabId));
+    // Chrome draws no PDF in a background tab: the debugger returns the viewer's empty grey.
+    if (before.contentType === 'application/pdf' && viewportOnly) {
+      return await bounded(() => captureVisible(tab, timers, deadline, true));
+    }
+    let refused = null;
     await bounded(async () => {
-      await chrome.debugger.attach(target, PROTOCOL_VERSION);
+      try { await chrome.debugger.attach(target, PROTOCOL_VERSION); } catch (err) { refused = err; return; }
       // An attach that finishes after a timeout must not leave a debugging session behind.
       if (finished) { await chrome.debugger.detach(target); return; }
       attached = true;
     });
+    if (refused) {
+      if (!viewportOnly) throw refused;
+      return await bounded(() => captureVisible(tab, timers, deadline, true));
+    }
     const current = await bounded(() => readAllowedPage(tabId));
     sameDocument(before, current);
     // Page.getLayoutMetrics / Page.captureScreenshot:
@@ -112,15 +201,7 @@ async function capture(tabId, options, deadline) {
     }
     // Hide only the overlay belonging to this extension in this document. Its own
     // deadline and self-restore cover an unresponsive page or a service-worker restart.
-    const hideDeadline = Math.min(deadline, Date.now() + 500);
-    hidden = await Promise.race([
-      chrome.tabs.sendMessage(tabId, { type: 'SET_OVERLAY_HIDDEN', hidden: true, deadline: hideDeadline },
-        { documentId: current.documentId }).then((r) => r?.success === true, () => false),
-      new Promise((resolve) => {
-        const timer = setTimeout(() => { timers.delete(timer); resolve(false); }, 500);
-        timers.add(timer);
-      }),
-    ]);
+    hidden = await hideOverlay(tabId, deadline, timers, current.documentId);
     const result = await bounded(() => chrome.debugger.sendCommand(target, 'Page.captureScreenshot', {
       format: 'png',
       fromSurface: true,
@@ -143,10 +224,7 @@ async function capture(tabId, options, deadline) {
   } finally {
     finished = true;
     for (const timer of timers) clearTimeout(timer);
-    if (hidden) {
-      chrome.tabs.sendMessage(tabId, { type: 'SET_OVERLAY_HIDDEN', hidden: false },
-        { documentId: before.documentId }).catch(() => {});
-    }
+    if (hidden) showOverlay(tabId, before.documentId);
     if (attached) await chrome.debugger.detach(target).catch(() => {});
   }
 }

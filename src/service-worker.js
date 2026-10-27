@@ -9,7 +9,7 @@
  */
 
 import { createInputQueue } from './input-queue.js';
-import { captureTabScreenshot } from './page-capture.js';
+import { captureTabScreenshot, readAllowedPage } from './page-capture.js';
 import { getPageSnapshot, clearPageSnapshots } from './page-snapshot.js';
 
 // Configuration - try production port first, then dev
@@ -544,8 +544,12 @@ async function executeBrowserCommand(command) {
         }
         return { success: true, contexts: ctxList, focusedTabId };
 
-      case 'screenshot':
-        return await captureTabScreenshot(targetTabId, params);
+      case 'screenshot': {
+        // No target tab known: 0.8.1 captured the selected tab of the current window
+        // (captureVisibleTab(null)), and Foxl Desktop sends no tabId when the model omits it.
+        const shotTabId = targetTabId ?? (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]?.id;
+        return await captureTabScreenshot(shotTabId, params);
+      }
         
       case 'scroll':
         return await scrollPage(targetTabId, params.direction, params.amount);
@@ -1040,18 +1044,28 @@ async function scrollPage(tabId, direction = 'down', amount = 500) {
   }
   
   try {
-    if (!['up', 'down'].includes(direction) || !Number.isFinite(amount) || amount < 0) {
-      return { success: false, error: 'scroll needs direction up/down and a non-negative amount.' };
+    // A negative amount scrolls the other way, as it did in 0.8.1 (the desktop's schema is
+    // z.number(), so a model can send one).
+    if (!['up', 'down'].includes(direction) || !Number.isFinite(amount)) {
+      return { success: false, error: 'scroll needs direction up/down and a numeric amount.' };
     }
-    const [scroll] = await chrome.scripting.executeScript({
-      target: { tabId, frameIds: [0] },
-      func: (dir, amt) => {
-        window.scrollBy({ top: dir === 'up' ? -amt : amt, behavior: 'instant' });
-        return { x: scrollX, y: scrollY };
-      },
-      args: [direction, amount],
-    });
-    return { success: true, tabId, scroll: scroll.result };
+    // Bounded like every other page read: with site access withheld Chrome leaves the
+    // injection pending, and the desktop would otherwise wait out its own 30 s timeout.
+    const page = await readAllowedPage(tabId, (dir, amt) => {
+      window.scrollBy({ top: dir === 'up' ? -amt : amt, behavior: 'instant' });
+      return { url: location.href, x: scrollX, y: scrollY };
+    }, [direction, amount]);
+    /*
+     * A tab in the background runs no rendering steps, so the page's scroll listeners and
+     * IntersectionObservers (infinite lists, lazy images) do not fire until it is drawn, and
+     * the next snapshot showed none of what the scroll should have loaded (measured: 0.8.1,
+     * which selected the tab, loaded it; this did not until a screenshot drew the tab). One
+     * 1x1 capture draws it once, through the same debugger path and site-access checks.
+     */
+    const tab = await chrome.tabs.get(tabId);
+    const rendered = tab.active || await captureTabScreenshot(tabId, { clip: { x: 0, y: 0, width: 1, height: 1 } })
+      .then(() => true, () => false);
+    return { success: true, tabId, scroll: { x: page.x, y: page.y }, rendered };
   } catch (err) {
     return { success: false, error: err.message };
   }
