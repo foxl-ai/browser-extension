@@ -1,0 +1,100 @@
+{
+  "extensionVersion": "0.9.0",
+  "uiCommit": "209a92f2abc92c43ca06af75323984c0973617a6",
+  "locale": "en",
+  "captureMethod": "Browser capture of shipping HTML/CSS/JS with a local Chrome transport fixture",
+  "content": "Illustrative local workflows; no personal accounts, real model run or customer data",
+  "framing": "Marketing copy and decorative browser frames surround the unchanged side-panel UI",
+  "sources": {
+    "manifest.json": "36b714f8d5363cb9f31daa84111269ba5ecfff22efb25222565814e8faf84ea6",
+    "sidepanel.html": "36ed42a7cfa19edb2fb5db617cc8136285b09563380dd4c6bbf1fedab5036520",
+    "styles/sidepanel.css": "f279c45a6357f3251dd1e81921bd8296bccafc6ad424398aa043c33c50eb8c69",
+    "src/sidepanel.js": "09cae3454ea17f80db989628225d13dbba74f5d6b141a521718e613b55d63a12",
+    "src/content-scripts/visual-indicator.js": "e50030609e85f8aea00236356e61755f08cb67a188e5f5e46ea47983e6867e0e",
+    "icons/icon.svg": "9342e80ffe53d24db0c797ac90231be1babbc802f2538df5e88d8ce9c90c4a9d",
+    "store/gallery.en.json": "560bf9c854c1a72e9859a857f3c3d2e2efefe8e58efe0b9a9f545a9a8b2f9c88",
+    "store/fixtures.json": "c358ed5e93b64c871357ebc6c837657d56aff23634aa25a659c6f146d5b39343",
+    "scripts/store-preview.mjs": "7f684ea975f7235ed2a52db2b29ee38f1d63ed006c22c07d4138fb70339f7016",
+    "store/source/runtime-fixture.js": "e15f4077b3f2dff23edb07ac942e575de7eeb5fbff4dfac9a674cb1cc532df25",
+    "store/source/demo-page.html": "827d28ea49189af1789a758862f452ae0e7bf55d212a6d0c01c90593f699a245",
+    "store/source/artwork.html": "53c63b9b54dc42e4befc83364db0967e985ee847cf2f2103255e4afd3da8cb44",
+    "store/source/artwork.css": "80ea779d3485c69142f688fdccf34afaa05289f1f98944bbfb211abb29153992",
+    "store/brand/Geist-Variable-latin.woff2": "9b6f5ff45b278c744b5f379a2c4ecbaf858a842b8eaf82ac8d21b699ca16c608",
+    "store/brand/OFL.txt": "d88d7652c574365906d9021720abb85aa2c7048f4076ed066f0b623d40352329",
+    "store/brand/foxl-logo-color.svg": "c69a99fa3a16ccdc511baeadfa66f087368c778ed5e0398c5a652b55c911ad1c",
+    "store/brand/foxl-logo-reversed.svg": "cc987b4b4ac885f3ea9d91e38711cc0a4ae1e6413e2d98b55afa02242921d82c",
+    "store/brand/foxl-mark-color.svg": "e692b4a63b0df2c4b1fe2422eaae86df1652a38a177f6af9a5be7cb2d3904f8a"
+  },
+  "assets": [
+    {
+      "file": "store/screenshots/en/01-browser.png",
+      "width": 1280,
+      "height": 800,
+      "format": "PNG",
+      "mode": "RGB",
+      "bytes": 318951,
+      "sha256": "7cff7932bb6a77cae37b9fa56af197495f95a6776788d8fe258de9624a8d3263",
+      "captureSha256": "224ed6e61bf573916ba2d502b52dce4ca313be7b36c793bb9f1025d338442d60"
+    },
+    {
+      "file": "store/screenshots/en/02-understand.png",
+      "width": 1280,
+      "height": 800,
+      "format": "PNG",
+      "mode": "RGB",
+      "bytes": 296802,
+      "sha256": "a79d4b2e0ac1e5bf7e482dbc9445ecf1dd03ae84a8f2169d3b805f24203ef117",
+      "captureSha256": "210b426f33924ad29ff99849ad5632e3115620003f3160d3c4e12c2615c05f03"
+    },
+    {
+      "file": "store/screenshots/en/03-tabs.png",
+      "width": 1280,
+      "height": 800,
+      "format": "PNG",
+      "mode": "RGB",
+      "bytes": 271615,
+      "sha256": "dc736ea0252794b8e06bfa948f5730498596d0b27df63d6ed8eb63fd5c2f6576",
+      "captureSha256": "5e2a274d283d6b9216188a849ba6fc5c4f2e21f08042e283efc70455d9fc45d4"
+    },
+    {
+      "file": "store/screenshots/en/04-control.png",
+      "width": 1280,
+      "height": 800,
+      "format": "PNG",
+      "mode": "RGB",
+      "bytes": 261424,
+      "sha256": "bf967b5c40e153286b76c339bd26bb9404256a0ca3ce8955ee14807d20678c75",
+      "captureSha256": "ac5e03b416583c63ef0a79fe12b8cdfa581a0933eeac251708d7b4b72bc65de5"
+    },
+    {
+      "file": "store/screenshots/en/05-desktop.png",
+      "width": 1280,
+      "height": 800,
+      "format": "PNG",
+      "mode": "RGB",
+      "bytes": 231020,
+      "sha256": "33f184ae431fc08c129a37daf42835d77cf468556eeae62b7159206955cd2fcb",
+      "captureSha256": "066cb5b6423d8d0ea7a49d93a7e1959492af8c6a37ec6b0f3a637b63605df1b9"
+    },
+    {
+      "file": "store/promo/small-440x280.png",
+      "width": 440,
+      "height": 280,
+      "format": "PNG",
+      "mode": "RGB",
+      "bytes": 29852,
+      "sha256": "9b9780cd826b697301d92bbfb5ae477eecbe40988948dd918de5a55827431a97",
+      "captureSha256": "49dbc2fcbded837bf753a40ea58cd75a2651deae79341fce9bcd875b7965d5c0"
+    },
+    {
+      "file": "store/promo/marquee-1400x560.png",
+      "width": 1400,
+      "height": 560,
+      "format": "PNG",
+      "mode": "RGB",
+      "bytes": 154947,
+      "sha256": "8a6fcfa7ff8c9f004b910adbc469487f0268f32d255e7b60b7625b306fe76c05",
+      "captureSha256": "5a95c154411e1b7e61bfd7922df44d9d6cbba804fbabb4976d90eb2fab12cde4"
+    }
+  ]
+}

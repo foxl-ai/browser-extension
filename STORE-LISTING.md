@@ -125,9 +125,13 @@ Certifications, all three of which are true of this code:
 ## Assets
 
 - Icon 128x128: `icons/icon-128.png` (in the repo)
-- Screenshots: 1280x800 (or 640x400), at least one. Show the side panel next to a
-  real page, and show the "Foxl Desktop is required" state - a reviewer will hit it.
-- Small promo tile 440x280 (optional but it is what the store shows in lists)
+- Screenshots: the five 1280x800 PNGs in `store/screenshots/en/`, in numbered order.
+  They show the shipping side panel next to local example pages, tab contexts,
+  the real activity indicator, and the "Foxl Desktop is required" first-run state.
+- Small promo tile 440x280: `store/promo/small-440x280.png`.
+- Marquee 1400x560: `store/promo/marquee-1400x560.png`.
+- Editable copy, capture workflow and provenance: `store/README.md`.
+- Review sheet: `store/review/contact-sheet.png`. This is not an upload image.
 - Privacy policy URL: https://github.com/foxl-ai/browser-extension/blob/main/PRIVACY.md
   (see the section above for why this is not `foxl.ai/privacy`)
 

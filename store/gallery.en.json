@@ -1,0 +1,63 @@
+{
+  "locale": "en",
+  "version": "0.9.0",
+  "requirement": "Requires Foxl Desktop",
+  "example": "Example workflow",
+  "slides": [
+    {
+      "id": "01-browser",
+      "scene": "research",
+      "theme": "light",
+      "layout": "hero",
+      "eyebrow": "YOUR BROWSER, WITH FOXL",
+      "headline": ["Less clicking.", "More doing."],
+      "description": "Ask in the side panel. Foxl reads, clicks and types in your real Chrome tabs.",
+      "detail": "Your tabs. Your signed-in sessions.",
+      "alt": "Foxl's actual side panel next to an example research page, with a request to collect three useful points and a plain-text answer."
+    },
+    {
+      "id": "02-understand",
+      "scene": "summary",
+      "theme": "light",
+      "layout": "wide",
+      "eyebrow": "FROM PAGE TO ANSWER",
+      "headline": ["Get to the point.", "Stay on the page."],
+      "description": "Turn a long page into a clear summary, right beside what you are reading.",
+      "detail": "Read a page. Ask a follow-up. Keep your place.",
+      "alt": "The actual Foxl side panel summarizing a local example article, with the article still visible beside it."
+    },
+    {
+      "id": "03-tabs",
+      "scene": "compare",
+      "theme": "dark",
+      "layout": "wide",
+      "eyebrow": "A LITTLE LESS TAB JUGGLING",
+      "headline": ["Three tabs.", "One clear answer."],
+      "description": "Ask Foxl to read across tabs and bring the useful details together.",
+      "detail": "Open, switch and group tabs as the task needs.",
+      "alt": "Foxl's actual tab context chips and a plain-text comparison of three fictional venues displayed beside a demo comparison page."
+    },
+    {
+      "id": "04-control",
+      "scene": "form",
+      "theme": "light",
+      "layout": "wide",
+      "eyebrow": "WORK YOU CAN FOLLOW",
+      "headline": ["Let Foxl do the steps.", "Stay in control."],
+      "description": "Fill fields and move through pages. See when Foxl is working, and stop it from the page.",
+      "detail": "The activity border and Stop Foxl control are built in.",
+      "alt": "Foxl working on a local demonstration form with the shipping teal activity border and Stop Foxl control, beside the actual side panel."
+    },
+    {
+      "id": "05-desktop",
+      "scene": "setup",
+      "theme": "light",
+      "layout": "setup",
+      "eyebrow": "THE BROWSER HALF OF FOXL",
+      "headline": ["Your desktop agent.", "Now in Chrome."],
+      "description": "Install Foxl Desktop and keep it running. The extension connects on the same computer.",
+      "detail": "Get Foxl Desktop at foxl.ai",
+      "alt": "The exact Foxl Desktop is required first-run state next to a three-step installation explanation."
+    }
+  ]
+}

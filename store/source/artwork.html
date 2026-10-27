@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Foxl Chrome Web Store artwork</title>
+  <link rel="stylesheet" href="/store/source/artwork.css">
+</head>
+<body>
+  <main class="artwork" id="artwork"></main>
+  <script>
+    const { slide, copy } = window.artwork;
+    const host = document.getElementById('artwork');
+    const escape = (s) => s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
+    const dark = slide.theme === 'dark';
+    const logo = `/store/brand/foxl-logo-${dark ? 'reversed' : 'color'}.svg`;
+    const mark = '/store/brand/foxl-mark-color.svg';
+    const sidepanel = (scene, cls='') => `<div class="sidepanel ${cls}"><div class="panel-title"><img src="${mark}" alt=""><span>Foxl</span><span class="panel-controls">⌄<span>×</span></span></div><div class="ui-viewport"><iframe title="Actual Foxl side panel" src="/raw?scene=${scene}"></iframe></div></div>`;
+    const browser = (scene) => `<div class="browser">
+      <div class="browser-tabs"><div class="traffic"><i></i><i></i><i></i></div><div class="browser-tab">${scene === 'summary'||scene === 'research' ? 'Fieldnotes' : scene === 'form' ? 'Session brief' : 'Team day shortlist'}<span>×</span></div><div class="tab-plus">+</div></div>
+      <div class="browser-toolbar"><span class="nav-arrows">‹ &nbsp; › &nbsp; ↻</span><div class="address"><span class="site-controls">☷</span> ${scene === 'summary'||scene === 'research' ? 'fieldnotes.example / journal' : 'gather.example / team-day'}</div><img src="${mark}" alt="Foxl"></div>
+      <div class="browser-body"><div class="page-viewport"><iframe title="Example webpage" src="/page?scene=${scene}"></iframe></div>${sidepanel(scene)}</div>
+    </div>`;
+    if (slide.id === 'small') {
+      host.className = 'artwork small-promo';
+      host.innerHTML = `<div class="promo-lines"><i></i><i></i><i></i></div><div class="promo-lockup"><img src="/store/brand/foxl-logo-color.svg" alt="Foxl"></div><div class="promo-label">A little less busywork.</div><div class="promo-bottom">YOUR BROWSER, WITH FOXL</div>`;
+    } else if (slide.id === 'marquee') {
+      host.className = 'artwork marquee';
+      host.innerHTML = `<div class="marquee-brand"><img src="/store/brand/foxl-logo-color.svg" alt="Foxl"><h1>A little less busywork.<br>A little more room.</h1><p>Your browser, with Foxl.</p><span class="requirement">Requires Foxl Desktop</span></div><div class="marquee-visual">${sidepanel('research')}</div><div class="marquee-line"></div>`;
+    } else {
+      host.className = `artwork ${slide.layout} ${slide.theme}`;
+      host.innerHTML = `
+        <header class="masthead"><img class="logo" src="${logo}" alt="Foxl"><div class="edition">FOR CHROME <span>0${copy.slides.findIndex(s=>s.id===slide.id)+1} / 05</span></div></header>
+        <section class="copy"><p class="eyebrow">${escape(slide.eyebrow)}</p><h1>${slide.headline.map(line=>`<span>${escape(line)}</span>`).join('')}</h1><p class="description">${escape(slide.description)}</p></section>
+        ${slide.layout==='setup' ? `
+          <div class="setup-steps">
+            <div><span class="step-number">1</span><span><strong>Get Foxl Desktop</strong><small>Download it at foxl.ai.</small></span></div>
+            <div><span class="step-number">2</span><span><strong>Keep the app running</strong><small>Your agent runs on your computer.</small></span></div>
+            <div><span class="step-number">3</span><span><strong>Open Foxl in Chrome</strong><small>Start from the browser side panel.</small></span></div>
+          </div><div class="setup-ui">${sidepanel('setup')}</div><div class="setup-caption">The first screen, before connecting.</div>` : `<div class="product">${browser(slide.scene)}</div>`}
+        <footer class="footer"><span>${escape(slide.detail)}</span><div>${slide.scene!=='setup'?`<span class="example">${copy.example}</span>`:''}<span class="requirement">${copy.requirement}</span></div></footer>`;
+    }
+    let count=0;
+    const expected=host.querySelectorAll('iframe').length;
+    window.addEventListener('message', (event) => {
+      if(event.origin===window.location.origin && event.data?.type==='foxl-capture-ready') {
+        count++;
+        if(count>=expected) document.documentElement.dataset.artworkReady='true';
+      }
+    });
+    if(expected===0) document.documentElement.dataset.artworkReady='true';
+  </script>
+</body>
+</html>
