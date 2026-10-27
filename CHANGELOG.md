@@ -18,6 +18,8 @@ The Chrome Web Store goes from 0.9.0 to this version: it also carries the v0.9.1
   and a new-chat action.
 - Replaced the unrelated global tab strip with a clearly labelled current-page
   control. It follows the panel's own Chrome window and can be excluded from a request.
+- Replaced the store gallery and README images with reviewed native Light-mode
+  captures from real Desktop tasks and the actual settings page.
 
 ### Fixed
 

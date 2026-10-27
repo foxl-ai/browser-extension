@@ -62,6 +62,9 @@ jobs:
       - name: Audit
         run: node scripts/audit.mjs
 
+      - name: Unit tests
+        run: node --test scripts/*.test.mjs
+
       - name: Build
         run: node scripts/build.mjs
 

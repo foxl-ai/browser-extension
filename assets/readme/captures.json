@@ -1,0 +1,41 @@
+{
+  "extensionVersion": "0.10.0",
+  "appearance": "Light",
+  "method": "Rectangular crop of the original native capture; no resizing or UI edits.",
+  "images": [
+    {
+      "file": "assets/readme/conversation-light.png",
+      "source": "store/source/captures/follow-up.jpg",
+      "sourceSha256": "16d7fc61743ec4288f2c14a3be229bb39b816e56b32a72860444b7af225b35e3",
+      "crop": [
+        2258,
+        254,
+        3008,
+        1648
+      ],
+      "size": [
+        750,
+        1394
+      ],
+      "displayWidth": 375,
+      "sha256": "ffaac7a94f2ffe1afb78f29ebb05f8e13c3504969364b7953170da99ea0c5e91"
+    },
+    {
+      "file": "assets/readme/settings-light.png",
+      "source": "store/source/captures/settings.jpg",
+      "sourceSha256": "7076f25ed12f338614449476bd4acf59aab6a1913cf16cbc7f473ad4af44611f",
+      "crop": [
+        842,
+        342,
+        2142,
+        1450
+      ],
+      "size": [
+        1300,
+        1108
+      ],
+      "displayWidth": 650,
+      "sha256": "96c84a78b2539c81be18e511bc847dfb5bcd7bb939269d85edc31cfab0e093a4"
+    }
+  ]
+}
