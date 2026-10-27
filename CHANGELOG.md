@@ -6,6 +6,12 @@ This extension has its own version line, independent of the Foxl Desktop release
 number. It used to ship inside the Foxl monorepo, where a script kept its manifest
 version pinned to the app's unified line; the split makes the two independent.
 
+## v0.9.1 (unreleased)
+
+### Fixed
+
+- A screenshot of a tab that Chrome had discarded to save memory no longer fails with "clip must be a positive rectangle". After the tab reloads in the background it has no size until it is drawn, so a plain screenshot now selects it for a moment and switches back, as 0.8.1 did. A clip or full-page screenshot of such a tab says to take a plain screenshot first.
+
 ## v0.9.0 - October 26, 2026
 
 ### When this update arrives
