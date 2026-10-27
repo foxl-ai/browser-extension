@@ -31,15 +31,18 @@ The matching `browser_result` carries the same ID and a `data.success` result.
 
 | Action | Parameters | Result |
 | :--- | :--- | :--- |
-| `screenshot` | No params for viewport; `clip: { x, y, width, height }` in viewport CSS pixels, or `fullPage: true` | PNG `dataUrl`, `captureMethod: "cdp"`, CSS `viewport` and `captureRect`, actual pixel `image: { width, height }`, document ID |
+| `screenshot` | No params for viewport; `clip: { x, y, width, height }` in viewport CSS pixels, or `fullPage: true` | PNG `dataUrl`, `captureMethod` (`"cdp"` for a background tab, `"visible-tab"` for the selected one, `"select-tab"` for the 0.8 fallback), CSS `viewport` and `captureRect`, actual pixel `image: { width, height }`, document ID |
 | `get_accessibility_tree` | `snapshot: true`; optional `since`, `filter`, `depth`, `maxChars`, `maxLines` | `snapshotId`, `mode: "full" / "diff"`, text, URL/title/viewport, explicit truncation |
-| `scroll` | Existing direction and amount | Actual scroll position, without selecting the tab |
+| `scroll` | Existing direction and amount (negative scrolls the other way) | Actual scroll position, without selecting the tab, and `rendered` once a background tab has been drawn |
 
-Capture supports HTTP(S) pages and attaches only to the requested tab. It checks the site-access grant using
-`scripting.executeScript`, hides its own overlay, and detaches even on failure.
-A debugger conflict, discarded tab, inaccessible page, navigation during capture,
-or deadline produces a failure; none activates a tab as a fallback. Chrome's
-debugging notice can appear. Crops must fit the viewport; full-page captures are
+Capture supports HTTP(S) pages, and file pages with "Allow access to file URLs" on. The selected
+tab of a window is captured with `tabs.captureVisibleTab`; only a background tab is attached to.
+It checks the site-access grant using `scripting.executeScript`, hides its own overlay, and
+detaches even on failure. An inaccessible page, navigation during capture, or deadline produces
+a failure. A discarded tab is reloaded in the background first. When Chrome refuses the attach
+(DevTools policy, another extension's frame in the page, an existing session) or the page is a PDF,
+a viewport capture selects the tab briefly, as 0.8 did; a clip or full-page capture fails.
+Chrome shows its "started debugging this browser" bar in every tab while attached, and for 5 s after. Crops must fit the viewport; full-page captures are
 limited to 16,384 CSS pixels per dimension and 32 million CSS pixels.
 
 The capture's pixel size can differ from both CSS size and `devicePixelRatio`.

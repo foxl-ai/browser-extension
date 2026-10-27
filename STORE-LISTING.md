@@ -94,7 +94,7 @@ re-verified rather than remembered. Every unused permission has been REMOVED -
 | `sidePanel` | The extension's entire UI is a side panel. `chrome.sidePanel.setPanelBehavior` / `.open` in `src/service-worker.js`. |
 | `storage` | Stores the user's optional custom server URL and whether a desktop has ever been reachable (which is what lets the panel say "Foxl Desktop is required" instead of "disconnected"). `src/options.js`, `src/service-worker.js`. |
 | `scripting` | Scrolls the requested page (`scrollPage` in `src/service-worker.js`), reads bounded snapshots (`src/page-snapshot.js`), and checks the current per-site access grant before and after debugger capture (`src/page-capture.js`). The page reader and activity indicator remain declared content scripts. |
-| `debugger` | Captures pixels from the requested tab without selecting it. `src/page-capture.js` attaches temporarily, calls only `Page.getLayoutMetrics` and `Page.captureScreenshot`, and detaches on success or failure. Scripting checks prevent the capture path from bypassing withheld site access. Chrome does not permit `debugger` as an optional permission. No arbitrary CDP command or network recording is exposed. |
+| `debugger` | Captures pixels from a tab in the background without selecting it: `chrome.tabs.captureVisibleTab` can capture only the selected tab, so without this a screenshot of the tab Foxl works in must switch the user away from the tab they are using. `src/page-capture.js` attaches temporarily, calls only `Page.getLayoutMetrics` and `Page.captureScreenshot`, and detaches on success or failure. Scripting checks prevent the capture path from bypassing withheld site access. Chrome does not permit `debugger` as an optional permission. No arbitrary CDP command or network recording is exposed. |
 | `tabs` | Core of the product: create, query, update, activate and close tabs on the user's instruction. Many call sites in `src/service-worker.js`. |
 | `tabGroups` | Keeps the tabs Foxl opens in one dedicated group, so its work is visually separate from the user's own tabs. `chrome.tabGroups.get/query/update`. |
 | `alarms` | An MV3 service worker is evicted, and a `setTimeout` dies with it. Alarms carry the reconnect backoff and the health re-check so a dropped connection recovers without the user reopening the panel. |
@@ -105,8 +105,8 @@ re-verified rather than remembered. Every unused permission has been REMOVED -
 - Personally identifiable information: **no**
 - Health information: **no**
 - Financial and payment information: **no**
-- Authentication information: no separate collection; password field values are
-  omitted from snapshots. Sensitive content can still appear in website content
+- Authentication information: no separate collection; password and hidden field
+  values are omitted from snapshots. Sensitive content can still appear in website content
   or screenshots; see PRIVACY.md.
 - Personal communications: **no**
 - Location: **no**

@@ -36,14 +36,15 @@ Page content can include whatever is on the page, and that may be personal:
 an email in a webmail tab, an order in a shop, a form you have partly filled in.
 The extension does not single such things out and does not try to detect them. It
 reads the tab the agent is working with. A full tree or a full-page screenshot
-can include content outside the current viewport. Password input values are
-omitted from text snapshots, but this does not redact sensitive text or pixels
-elsewhere on a page.
+can include content outside the current viewport. Snapshots include what you have
+typed into text fields. Password and hidden field values are omitted from text
+snapshots, but this does not redact sensitive text or pixels elsewhere on a page.
 
 The `debugger` permission added in 0.9 has broad browser capabilities. This code
-uses it only for `Page.getLayoutMetrics` and `Page.captureScreenshot`; it does
-not request arbitrary CDP commands from the desktop, read cookies, or record
-network traffic. A real scripting call checks Chrome's current site access
+uses it only for `Page.getLayoutMetrics` and `Page.captureScreenshot` on a tab in
+the background; it does not request arbitrary CDP commands from the desktop, read
+cookies, or record network traffic. Chrome shows a "started debugging this
+browser" bar while it is attached. A real scripting call checks Chrome's current site access
 before attachment and before returning the image. The debugger is detached
 after capture, including on failure.
 
@@ -71,7 +72,7 @@ it, and so the two cannot drift apart quietly.
 | Personally identifiable information | No | Nothing of the kind is extracted, singled out or detected. Page content is passed through as page content; if a name or an address happens to be on the page, it is on the page. |
 | Health information | No | Not collected. |
 | Financial and payment information | No | Not collected. |
-| Authentication information | No separate collection | Password input values are omitted from text snapshots. The code calls no cookie or token API. Sensitive information can still be present in website content or screenshots. |
+| Authentication information | No separate collection | Password and hidden field values are omitted from text snapshots. The code calls no cookie or token API. Sensitive information can still be present in website content or screenshots. |
 | Personal communications | No | Not extracted or singled out, for the same reason as personally identifiable information above. |
 | Location | No | Not collected. No geolocation API is used. |
 | Web history | No browsing-history collection | The extension reads the target tab's URL and title. Snapshot baselines temporarily hold the URL in memory; they are not a history database. |
