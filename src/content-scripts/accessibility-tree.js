@@ -141,7 +141,9 @@
       if (inputType === 'submit' && value?.trim()) {
         return value.trim();
       }
-      if (inputType !== 'password' && element.value && element.value.length < 50 && element.value.trim()) {
+      // element.type, not the attribute: type="PASSWORD" is a password too. A hidden
+      // field's value (a CSRF or session token) is not on screen, so it is never a name.
+      if (!['password', 'hidden'].includes(element.type) && element.value && element.value.length < 50 && element.value.trim()) {
         return element.value.trim();
       }
     }
@@ -313,7 +315,7 @@
         line += ` placeholder="${element.getAttribute('placeholder')}"`;
       }
       if ((element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
-        && element.type !== 'password' && !['checkbox', 'radio', 'file', 'submit', 'button'].includes(element.type)) {
+        && !['password', 'hidden', 'checkbox', 'radio', 'file', 'submit', 'button'].includes(element.type)) {
         line += ` value="${element.value.replace(/\s+/g, ' ').slice(0, 200).replace(/"/g, '\\"')}"`;
       }
       if (element instanceof HTMLInputElement && ['checkbox', 'radio'].includes(element.type)) {
