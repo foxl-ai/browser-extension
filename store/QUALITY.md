@@ -36,13 +36,33 @@ streaming claim. The gallery does not advertise Stop as a side-panel capability.
 
 ## Automated checks
 
-Run through the shared Mac queue:
+Final release checks:
 
 ```sh
-/Users/sanghwa/.claude/shared/heavy.sh /bin/zsh -c 'node scripts/audit.mjs && node --test scripts/*.test.mjs && node scripts/build.mjs'
+node scripts/audit.mjs
+node --test --test-concurrency=1 scripts/*.test.mjs
+node scripts/build.mjs
 ```
 
-The permission audit passed with seven permissions. All 15 node tests passed.
-The release build uses its existing deterministic allowlist and no new runtime
-dependencies. A final rebuild and archive comparison is recorded with the release
-artifacts. No production data directory is used by the automated checks.
+The source audit passed for 11 source files, seven permissions, and ten Chrome
+namespaces. All 15 node tests passed with zero failures. The release build uses
+its existing deterministic allowlist and adds no runtime dependencies. No
+production data directory was used by the automated checks.
+
+Two consecutive builds produced byte-identical packages. The versioned and
+`latest` ZIP files also match each other. Archive integrity passed, the manifest
+reports version 0.10.0, and all 27 packaged files match the release source bytes.
+
+| Artifact | Final result |
+| --- | --- |
+| Package | `foxl-browser-extension-0.10.0.zip` |
+| Size | 225,409 bytes |
+| Entries | 27 files |
+| SHA-256 | `481d521c29e45fa60a01e6e078327e43d588e60bf9547cde7e111bc20bbdff8f` |
+| Reproducibility | Two builds and both ZIP filenames have the same digest. |
+| Gallery provenance | All 21 source hashes in the render manifest match the release source. |
+| README captures | Both RGB images exactly match their recorded native-capture crop pixels. |
+
+Local release artifacts include `SHA256SUMS.txt`, `RELEASE-NOTES.md`, and
+`VALIDATION.json`. Chrome Web Store submission status is recorded separately
+from the local Git release; preparing the package does not imply store approval.
