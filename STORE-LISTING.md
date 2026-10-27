@@ -144,6 +144,8 @@ Certifications, all three of which are true of this code:
 - Marquee 1400x560: `store/promo/marquee-1400x560.png`.
 - Editable copy, capture workflow and provenance: `store/README.md`.
 - Review sheet: `store/review/contact-sheet.png`. This is not an upload image.
+- Reviewer setup and task steps: `store/review/test-instructions.txt`, also saved
+  in the dashboard's Test instructions field.
 - Privacy policy URL: https://github.com/foxl-ai/browser-extension/blob/main/PRIVACY.md
   (see the section above for why this is not `foxl.ai/privacy`)
 
