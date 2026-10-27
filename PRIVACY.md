@@ -2,16 +2,16 @@
 
 This page covers the Foxl browser extension. The Foxl desktop app and the Foxl
 services have their own policy at <https://foxl.ai/privacy>; that distinction
-matters here, because the extension's whole data story is "it hands things to the
-app on your machine and stops there."
+matters here: the extension hands page data to its configured Foxl server, and the
+desktop app decides what context to send to the model or connected service.
 
-Last updated: August 18, 2026.
+Last updated: October 26, 2026.
 
 ## The short version
 
-The extension sends nothing to Foxl, and nothing to anyone else. It talks to one
-host: the Foxl desktop app running on your own computer, at
-`http://localhost:13847` by default. There is no analytics, no telemetry, no
+By default, the extension talks to the Foxl desktop app on your own computer, at
+`http://localhost:13847`, with port `3847` as a fallback. A custom server URL in
+the options changes that destination. There is no analytics, no telemetry, no
 crash reporting, no remote configuration, and no third-party code in this
 extension.
 
@@ -26,28 +26,33 @@ about them is more useful than a reassuring summary:
 
 | Data | Why | Where it goes |
 |---|---|---|
-| Page content: text, labels, and structure of the pages you point the agent at | So the agent can understand a page and find the element to act on | The local Foxl app |
-| Screenshots of the visible tab | Visual confirmation of what the page looks like | The local Foxl app |
-| Tab URLs and titles | So a task can move between sites and the agent knows where it is | The local Foxl app |
+| Page content: text, labels, field values, and structure of the pages you point the agent at | So the agent can understand a page and find the element to act on | The configured Foxl server |
+| Screenshots of the requested tab, including a rectangle or the full document | Visual confirmation of what the page looks like | The configured Foxl server |
+| Tab URLs and titles | So a task can move between sites and the agent knows where it is | The configured Foxl server |
 | Actions the agent performs: clicks, typed text, navigation | They are the work itself | Performed in your browser |
 | Your settings: the server URL | So you do not re-enter it | `chrome.storage.local`, on your machine only |
 
 Page content can include whatever is on the page, and that may be personal:
 an email in a webmail tab, an order in a shop, a form you have partly filled in.
 The extension does not single such things out and does not try to detect them. It
-reads what is on screen in the tab the agent is working with, the way a screen
-reader does.
+reads the tab the agent is working with. A full tree or a full-page screenshot
+can include content outside the current viewport. Snapshots include what you have
+typed into text fields. Password and hidden field values are omitted from text
+snapshots, but this does not redact sensitive text or pixels elsewhere on a page.
 
-Two limits worth stating because they are enforced by what the extension is not
-allowed to do, not by good intentions: it holds neither the `cookies` permission
-nor `webRequest`, so it cannot read your cookies or intercept your traffic. It
-reads the rendered page, and nothing beneath it.
+The `debugger` permission added in 0.9 has broad browser capabilities. This code
+uses it only for `Page.getLayoutMetrics` and `Page.captureScreenshot` on a tab in
+the background; it does not request arbitrary CDP commands from the desktop, read
+cookies, or record network traffic. Chrome shows a "started debugging this
+browser" bar while it is attached. A real scripting call checks Chrome's current site access
+before attachment and before returning the image. The debugger is detached
+after capture, including on failure.
 
 ## What the extension does not do
 
-- It does not send data to Foxl's servers or to any third party.
-- It does not sell or transfer your data to anyone. There is nobody to transfer
-  it to.
+- It has no analytics or advertising destination. Page data goes to the
+  configured server for the task; the default destination is local.
+- It does not sell your data.
 - It does not use your data for anything unrelated to performing the task you
   asked for.
 - It does not use your data to determine creditworthiness or for lending.
@@ -63,31 +68,35 @@ it, and so the two cannot drift apart quietly.
 
 | Store data category | Collected | Detail |
 |---|---|---|
-| Website content | **Yes** | The text, labels and structure of the page you point the agent at, and a screenshot of the visible tab, are read and handed to the Foxl app on your own machine so it can decide what to read, click or type next. |
+| Website content | **Yes** | Page text, labels, field values, structure, and screenshots are read and handed to the configured Foxl server so it can decide what to read, click or type next. |
 | Personally identifiable information | No | Nothing of the kind is extracted, singled out or detected. Page content is passed through as page content; if a name or an address happens to be on the page, it is on the page. |
 | Health information | No | Not collected. |
 | Financial and payment information | No | Not collected. |
-| Authentication information | No | No password, token or cookie is read. The extension holds neither the `cookies` nor the `webRequest` permission, so it cannot. |
+| Authentication information | No separate collection | Password and hidden field values are omitted from text snapshots. The code calls no cookie or token API. Sensitive information can still be present in website content or screenshots. |
 | Personal communications | No | Not extracted or singled out, for the same reason as personally identifiable information above. |
 | Location | No | Not collected. No geolocation API is used. |
-| Web history | No | The extension keeps no history. It reads the URL and title of the tab it is acting on and stores neither. |
+| Web history | No browsing-history collection | The extension reads the target tab's URL and title. Snapshot baselines temporarily hold the URL in memory; they are not a history database. |
 | User activity | No | Your clicks, keystrokes and mouse movement are not recorded. The clicks and typing that do happen are the agent carrying out the instruction you gave it. |
 
 The three certifications the store requires, each true of this code:
 
 - Data is **not sold** to third parties, and is not transferred to any third party for
-  a purpose unrelated to the item's single purpose. There is no third party in the
-  path at all: the only host this extension talks to is the Foxl app on your own
-  computer.
+  a purpose unrelated to the item's single purpose. Page data goes to the
+  configured Foxl server for the requested task.
 - Data is used **only** for the single purpose stated in the listing, which is
   performing the browser task you asked for.
 - Data is **not used** to determine creditworthiness or for lending purposes.
 
 ## Retention
 
-The extension keeps no history. Page content and screenshots pass through it and
-are not stored; the only thing it persists is your settings, in
-`chrome.storage.local`. Removing the extension from Chrome deletes that.
+The extension keeps up to 32 text snapshot baselines in service-worker memory,
+including the corresponding tab and document identity and URL. Baselines expire
+for reuse after five minutes and are removed during the next snapshot cleanup.
+Closing the tab, disconnecting the desktop, or restarting the service worker also
+clears the relevant baselines. They are never written to extension storage.
+
+Screenshots pass through the extension without being written to disk by it.
+Settings persist in `chrome.storage.local`; removing the extension deletes those.
 
 Anything the desktop app retains after receiving this data is covered by
 <https://foxl.ai/privacy>.
@@ -105,7 +114,7 @@ Anything the desktop app retains after receiving this data is covered by
   that do not send that signal leave them off, so with those versions the agent
   can type and click on a page without the border showing.
 - **Cut the connection.** Quit the desktop app. With nothing listening on
-  localhost the extension can do nothing at all.
+  its configured server, the extension receives no new task commands.
 - **Remove it.** Uninstalling from `chrome://extensions` takes its stored
   settings with it.
 

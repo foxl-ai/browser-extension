@@ -80,7 +80,7 @@ textbox "Search" [ref_4] placeholder="Search..."
 button "Sign in" [ref_5]
 ```
 
-Screenshots provide a separate visual view. A service worker handles the desktop connection, tab management, and command dispatch; content scripts carry out page actions and display activity indicators.
+Screenshots capture a background tab without selecting it, including a chosen rectangle or the full document. On a compatible desktop, snapshots can return just the changes since a previously read snapshot. A service worker handles the desktop connection, tab management, and command dispatch; content scripts carry out page actions and display activity indicators.
 
 ## Where your data goes
 
@@ -110,15 +110,18 @@ The manifest requests access to all sites so the agent can work on the pages you
 
 | Permission | What it enables |
 | :--- | :--- |
-| `<all_urls>` | Read and interact with pages; capture the visible tab. |
+| `<all_urls>` | Read and interact with the pages you allow. |
 | `tabs` | Read tab titles and URLs, navigate, and open, switch, or close tabs. |
-| `scripting` | Scroll the page (`scrollPage`). The page reader and the activity indicator are declared content scripts. |
+| `scripting` | Read snapshots, scroll, and check the target page's current site access before and after a screenshot. |
+| `debugger` | Briefly attach to a background tab to read its viewport and capture its pixels without selecting it. |
 | `tabGroups` | Organize tabs opened for agent tasks. |
 | `sidePanel` | Show the conversation beside the current page. |
 | `storage` | Save connection settings locally. |
 | `alarms` | Maintain the service worker's connection lifecycle. |
 
-The extension does not request the `cookies`, `webRequest`, or `debugger` APIs. Its page access can still expose sensitive content visible on a website, so choose site access with that in mind.
+Version 0.9 adds `debugger`, which Chrome does not allow as an optional permission. **When Chrome updates the extension to 0.9, it turns Foxl off until you accept the new permission** ("Access the page debugger backend"): open Chrome's menu, choose "Foxl is disabled", and accept, or switch Foxl back on in `chrome://extensions`.
+
+While Foxl captures a background tab, or draws one after scrolling it, Chrome shows a bar at the top of every tab in every window: "Foxl" started debugging this browser, with a Cancel button. The bar shortens the page you are viewing and closes 5 seconds after the last capture. The tab you are looking at is captured without the debugger. The API has broad capabilities; this extension uses only `Page.getLayoutMetrics` and `Page.captureScreenshot`, checks site access with `scripting` before attaching and before returning pixels, and detaches after each capture. It exposes no arbitrary CDP command, cookie reader, or network recorder. Where Chrome refuses the debugger (an administrator's DevTools policy, a page containing another extension's frame) or cannot draw a background tab (a PDF), a screenshot selects the tab for a moment and switches back, as 0.8 did. Without site access, a screenshot fails.
 
 [manifest.json](manifest.json) declares the permissions. [scripts/audit.mjs](scripts/audit.mjs) checks permission usage and the network and executable-code surface in CI.
 
@@ -128,6 +131,8 @@ The extension does not request the `cookies`, `webRequest`, or `debugger` APIs. 
 | :--- | :--- |
 | [src/service-worker.js](src/service-worker.js) | Connection, tabs, and command routing |
 | [src/input-queue.js](src/input-queue.js) | One click / type / key at a time per tab, each with a deadline |
+| [src/page-capture.js](src/page-capture.js) | Background screenshots, page-access checks, and CSS geometry |
+| [src/page-snapshot.js](src/page-snapshot.js) | Bounded snapshots and explicit baselines for changes |
 | [src/content-scripts/](src/content-scripts/) | Page accessibility tree and visual indicators |
 | [src/sidepanel.js](src/sidepanel.js) · [sidepanel.html](sidepanel.html) | Side panel conversation |
 | [src/options.js](src/options.js) · [options.html](options.html) | Server selection and connection checks |

@@ -25,8 +25,9 @@ That sentence is the whole justification for `<all_urls>`, so do not soften it i
 ## Detailed description
 
 Lead with the prerequisite. Most people who install a browser extension do not have
-a desktop app, and this one talks ONLY to a local websocket on 127.0.0.1 (port 13847,
-then 3847) - so somebody without Foxl Desktop has nothing to connect to. The
+a desktop app, and this one talks to a local websocket by default (port 13847,
+then 3847). The options can override that server URL. Somebody without a Foxl
+server has nothing to connect to. The
 extension says this in its side panel now, and the listing must say it too.
 
 ```
@@ -42,14 +43,15 @@ What it does
 - Side panel chat, next to the page you are working on
 - Reads the page's accessibility tree so the agent understands structure, not pixels
 - Clicks, types, scrolls and navigates on your instruction
+- Captures the requested tab without switching to it, including a selected region
 - Groups the tabs it opens so its work stays separate from yours
 
 Where your data goes
-- The page content the agent reads goes to the Foxl Desktop app on your computer.
+- The page content the agent reads goes to your configured Foxl server, on your
+  computer by default. A custom server URL changes that destination.
 - Foxl Desktop decides what to send to a model, and that is configured in the app
   (your own API key, your own AWS account, or Foxl's relay if you signed in to it).
-- This extension has no analytics, no advertising SDK and no third-party identifier,
-  and it sends nothing anywhere except to Foxl Desktop on your own machine.
+- This extension has no analytics, no advertising SDK and no third-party identifier.
 
 Source code: https://github.com/foxl-ai/browser-extension
 Privacy: https://github.com/foxl-ai/browser-extension/blob/main/PRIVACY.md
@@ -91,7 +93,8 @@ re-verified rather than remembered. Every unused permission has been REMOVED -
 |---|---|
 | `sidePanel` | The extension's entire UI is a side panel. `chrome.sidePanel.setPanelBehavior` / `.open` in `src/service-worker.js`. |
 | `storage` | Stores the user's optional custom server URL and whether a desktop has ever been reachable (which is what lets the panel say "Foxl Desktop is required" instead of "disconnected"). `src/options.js`, `src/service-worker.js`. |
-| `scripting` | Scrolls the page the user asked Foxl to act on (`chrome.scripting.executeScript` running `window.scrollBy` in `scrollPage`, `src/service-worker.js`). That is its only call site: the accessibility-tree reader and the activity indicator are declared `content_scripts` in `manifest.json` and are not injected through this API. |
+| `scripting` | Scrolls the requested page (`scrollPage` in `src/service-worker.js`), reads bounded snapshots (`src/page-snapshot.js`), and checks the current per-site access grant before and after debugger capture (`src/page-capture.js`). The page reader and activity indicator remain declared content scripts. |
+| `debugger` | Captures pixels from a tab in the background without selecting it: `chrome.tabs.captureVisibleTab` can capture only the selected tab, so without this a screenshot of the tab Foxl works in must switch the user away from the tab they are using. `src/page-capture.js` attaches temporarily, calls only `Page.getLayoutMetrics` and `Page.captureScreenshot`, and detaches on success or failure. Scripting checks prevent the capture path from bypassing withheld site access. Chrome does not permit `debugger` as an optional permission. No arbitrary CDP command or network recording is exposed. |
 | `tabs` | Core of the product: create, query, update, activate and close tabs on the user's instruction. Many call sites in `src/service-worker.js`. |
 | `tabGroups` | Keeps the tabs Foxl opens in one dedicated group, so its work is visually separate from the user's own tabs. `chrome.tabGroups.get/query/update`. |
 | `alarms` | An MV3 service worker is evicted, and a `setTimeout` dies with it. Alarms carry the reconnect backoff and the health re-check so a dropped connection recovers without the user reopening the panel. |
@@ -102,14 +105,17 @@ re-verified rather than remembered. Every unused permission has been REMOVED -
 - Personally identifiable information: **no**
 - Health information: **no**
 - Financial and payment information: **no**
-- Authentication information: **no**
+- Authentication information: no separate collection; password and hidden field
+  values are omitted from snapshots. Sensitive content can still appear in website content
+  or screenshots; see PRIVACY.md.
 - Personal communications: **no**
 - Location: **no**
-- Web history: **no**
+- Web history: **no browsing-history collection**; snapshot baselines temporarily
+  hold the target URL in memory, as documented in PRIVACY.md.
 - User activity: **no** (the extension records nothing; it forwards the user's own
   instruction and the page it acts on to the local desktop app)
-- Website content: **YES** - page content is read and sent to the Foxl Desktop app on
-  the user's own machine, in order to perform the task the user asked for.
+- Website content: **YES** - page text, field values, structure, and screenshots go
+  to the configured Foxl server for the task. The default server is local.
 
 Certifications, all three of which are true of this code:
 - data is not sold to third parties;

@@ -9,6 +9,8 @@
  */
 
 import { createInputQueue } from './input-queue.js';
+import { captureTabScreenshot, readAllowedPage } from './page-capture.js';
+import { getPageSnapshot, clearPageSnapshots } from './page-snapshot.js';
 
 // Configuration - try production port first, then dev
 const SERVER_PORTS = [13847, 3847];
@@ -236,6 +238,7 @@ async function connectToServer() {
       
       serverSocket.onclose = (event) => {
         console.log('[Foxl] Disconnected from server:', event.code, event.reason);
+        clearPageSnapshots();
         serverSocket = null;
         // Forget the peer's version with the socket. Keeping it would attribute the
         // old desktop's version to whatever answers next.
@@ -463,6 +466,7 @@ async function executeBrowserCommand(command) {
   try {
     switch (action) {
       case 'get_accessibility_tree':
+        if (params?.snapshot) return await getPageSnapshot(targetTabId, params);
         return await getAccessibilityTree(targetTabId, params);
         
       case 'click':
@@ -540,8 +544,12 @@ async function executeBrowserCommand(command) {
         }
         return { success: true, contexts: ctxList, focusedTabId };
 
-      case 'screenshot':
-        return await takeScreenshot(targetTabId);
+      case 'screenshot': {
+        // No target tab known: 0.8.1 captured the selected tab of the current window
+        // (captureVisibleTab(null)), and Foxl Desktop sends no tabId when the model omits it.
+        const shotTabId = targetTabId ?? (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]?.id;
+        return await captureTabScreenshot(shotTabId, params);
+      }
         
       case 'scroll':
         return await scrollPage(targetTabId, params.direction, params.amount);
@@ -576,8 +584,10 @@ async function getAccessibilityTree(tabId, params = {}) {
       depth: params.depth || 15,
       maxChars: params.maxChars,
       refId: params.refId
-    });
-    
+    }, { frameId: 0 });
+    if (!result?.success || result.data?.error) {
+      return { success: false, error: result?.error || result?.data?.error || 'The page reader returned no result.' };
+    }
     return { success: true, data: result.data };
   } catch (err) {
     return { success: false, error: err.message };
@@ -594,9 +604,8 @@ async function getAccessibilityTree(tabId, params = {}) {
  * READ BACK and reported as a failure when the text is not in the field, and every answer
  * names how it acted (`method`).
  *
- * All of this is page events from the content script. Trusted input (chrome.debugger) is
- * NOT here: Chrome refuses `debugger` as an optional permission, and as a required one it
- * would bypass the user's per-site access settings ("On click" sites become readable).
+ * Input remains in the content script. The debugger permission used for background
+ * screenshots does not change these events into trusted input.
  */
 
 /**
@@ -1023,69 +1032,6 @@ async function getTabs() {
 }
 
 /**
- * Temporarily activate a tab, run a callback, then restore the previous tab.
- * Needed because some Chrome APIs (captureVisibleTab, scrollBy) only work on the visible tab.
- */
-async function withActiveTab(tabId, fn) {
-  const tab = await chrome.tabs.get(tabId);
-  const windowId = tab.windowId;
-
-  // Already active — just run
-  if (tab.active) {
-    return await fn(tabId, windowId);
-  }
-
-  const [prevActive] = await chrome.tabs.query({ active: true, windowId });
-
-  // Activate target
-  await chrome.tabs.update(tabId, { active: true });
-  await new Promise(r => setTimeout(r, 150));
-
-  try {
-    return await fn(tabId, windowId);
-  } finally {
-    // Restore previous tab
-    if (prevActive?.id && prevActive.id !== tabId) {
-      await chrome.tabs.update(prevActive.id, { active: true });
-    }
-  }
-}
-
-/**
- * Take screenshot of tab
- */
-async function takeScreenshot(tabId) {
-  try {
-    if (!tabId) {
-      const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
-      return { success: true, dataUrl };
-    }
-
-    const dataUrl = await withActiveTab(tabId, async (_tid, windowId) => {
-      // Foxl's own overlay is not part of the page: hidden for the capture (never longer than
-      // 500 ms of waiting on a page that does not answer, e.g. one showing a dialog). The hide
-      // carries the same 500 ms as a deadline, so a page that frees up later REFUSES it rather
-      // than hiding the user's Stop button with no restore coming; the page also undoes a
-      // hide by itself after 1.5 s.
-      const HIDE_WAIT_MS = 500;
-      const hidden = await Promise.race([
-        chrome.tabs.sendMessage(tabId, { type: 'SET_OVERLAY_HIDDEN', hidden: true, deadline: Date.now() + HIDE_WAIT_MS }).then((r) => r?.success === true, () => false),
-        new Promise((r) => setTimeout(() => r(false), HIDE_WAIT_MS)),
-      ]);
-      try {
-        return await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
-      } finally {
-        if (hidden) chrome.tabs.sendMessage(tabId, { type: 'SET_OVERLAY_HIDDEN', hidden: false }).catch(() => {});
-      }
-    });
-
-    return { success: true, dataUrl, tabId };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-}
-
-/**
  * Scroll page
  */
 async function scrollPage(tabId, direction = 'down', amount = 500) {
@@ -1098,19 +1044,28 @@ async function scrollPage(tabId, direction = 'down', amount = 500) {
   }
   
   try {
-    await withActiveTab(tabId, async (tid) => {
-      await chrome.scripting.executeScript({
-        target: { tabId: tid },
-        func: (dir, amt) => {
-          const y = dir === 'up' ? -amt : amt;
-          window.scrollBy({ top: y, behavior: 'smooth' });
-        },
-        args: [direction, amount]
-      });
-      // Wait for smooth scroll to finish
-      await new Promise(r => setTimeout(r, 300));
-    });
-    return { success: true };
+    // A negative amount scrolls the other way, as it did in 0.8.1 (the desktop's schema is
+    // z.number(), so a model can send one).
+    if (!['up', 'down'].includes(direction) || !Number.isFinite(amount)) {
+      return { success: false, error: 'scroll needs direction up/down and a numeric amount.' };
+    }
+    // Bounded like every other page read: with site access withheld Chrome leaves the
+    // injection pending, and the desktop would otherwise wait out its own 30 s timeout.
+    const page = await readAllowedPage(tabId, (dir, amt) => {
+      window.scrollBy({ top: dir === 'up' ? -amt : amt, behavior: 'instant' });
+      return { url: location.href, x: scrollX, y: scrollY };
+    }, [direction, amount]);
+    /*
+     * A tab in the background runs no rendering steps, so the page's scroll listeners and
+     * IntersectionObservers (infinite lists, lazy images) do not fire until it is drawn, and
+     * the next snapshot showed none of what the scroll should have loaded (measured: 0.8.1,
+     * which selected the tab, loaded it; this did not until a screenshot drew the tab). One
+     * 1x1 capture draws it once, through the same debugger path and site-access checks.
+     */
+    const tab = await chrome.tabs.get(tabId);
+    const rendered = tab.active || await captureTabScreenshot(tabId, { clip: { x: 0, y: 0, width: 1, height: 1 } })
+      .then(() => true, () => false);
+    return { success: true, tabId, scroll: { x: page.x, y: page.y }, rendered };
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -1374,6 +1329,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Tab closed — clean up from contexts
 chrome.tabs.onRemoved.addListener((tabId) => {
+  clearPageSnapshots(tabId);
   if (tabContexts.has(tabId)) {
     tabContexts.delete(tabId);
     if (focusedTabId === tabId) {

@@ -141,7 +141,9 @@
       if (inputType === 'submit' && value?.trim()) {
         return value.trim();
       }
-      if (element.value && element.value.length < 50 && element.value.trim()) {
+      // element.type, not the attribute: type="PASSWORD" is a password too. A hidden
+      // field's value (a CSRF or session token) is not on screen, so it is never a name.
+      if (!['password', 'hidden'].includes(element.type) && element.value && element.value.length < 50 && element.value.trim()) {
         return element.value.trim();
       }
     }
@@ -311,6 +313,18 @@
       }
       if (element.getAttribute('placeholder')) {
         line += ` placeholder="${element.getAttribute('placeholder')}"`;
+      }
+      if ((element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
+        && !['password', 'hidden', 'checkbox', 'radio', 'file', 'submit', 'button'].includes(element.type)) {
+        line += ` value="${element.value.replace(/\s+/g, ' ').slice(0, 200).replace(/"/g, '\\"')}"`;
+      }
+      if (element instanceof HTMLInputElement && ['checkbox', 'radio'].includes(element.type)) {
+        line += ` checked=${element.checked}`;
+      }
+      if (element.disabled || element.getAttribute('aria-disabled') === 'true') line += ' disabled';
+      for (const state of ['expanded', 'selected', 'checked']) {
+        const value = element.getAttribute(`aria-${state}`);
+        if (value !== null) line += ` ${state}=${JSON.stringify(value)}`;
       }
 
       output.push(line);

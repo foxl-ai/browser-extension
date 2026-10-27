@@ -6,6 +6,30 @@ This extension has its own version line, independent of the Foxl Desktop release
 number. It used to ship inside the Foxl monorepo, where a script kept its manifest
 version pinned to the app's unified line; the split makes the two independent.
 
+## v0.9.0 - October 26, 2026
+
+### When this update arrives
+
+- This version adds Chrome's `debugger` permission, which Chrome does not allow to be optional. Its new warning, "Access the page debugger backend", makes **Chrome turn Foxl off when it updates until you accept it**. Open Chrome's menu, choose "Foxl is disabled", and accept the new permissions, or switch Foxl back on in `chrome://extensions`. Until then Foxl Desktop reports the extension as not connected.
+- To capture a tab in the background without selecting it, Foxl attaches Chrome's debugger to that tab for about half a second. While it does, Chrome shows a bar at the top of every tab in every window, "Foxl" started debugging this browser, with a Cancel button. The bar makes the page you are viewing shorter (57 CSS pixels on macOS) and closes 5 seconds after the last capture. Scrolling a background tab also draws it once this way.
+- The tab you are looking at is captured the way 0.8.1 did, without the debugger and without the bar.
+- Where Chrome refuses the debugger (DevTools turned off by an administrator, a page that contains another extension's frame, such as a password manager's) or does not draw a background tab (a PDF), a screenshot selects the tab for a moment and switches back, as in 0.8.1.
+- Clicks, typing, keys, and hover still use page events. The `debugger` permission does not make them trusted input.
+
+### Added
+
+- Screenshots of a tab in the background, without selecting it. With a desktop that asks for them, a rectangle within the viewport or the full document. Results report the CSS rectangle and the PNG's pixel size.
+- With a compatible desktop, page snapshots can return only changes since an explicitly supplied snapshot ID. Limits on text and lines report truncation; a different tab, document, filter, expired baseline, or missing baseline returns a full snapshot.
+- Snapshots include the current value of text fields and the checked, disabled, expanded, and selected states. Password and hidden field values are never included, as a value or as a name.
+
+### Fixed
+
+- Scrolling no longer selects the tab and scrolls the full amount. 0.8.1's smooth scroll stopped when it switched back (834 of 1,200 pixels in a test page).
+- An unlabelled password field is no longer named by its value in snapshots.
+- Back-to-back screenshots of background tabs no longer fail with Chrome's limit of two captures per second.
+- Screenshot requests on one tab run in order and detach the debugger when finished. Invalid crops and a page that navigates during capture are refused.
+- Snapshot and page-access failures reach the desktop as failures.
+
 ## v0.8.1 - October 5, 2026
 
 ### Fixed

@@ -53,3 +53,7 @@ Stated here so a deviation is reportable as a bug rather than a design question:
 - It stores nothing outside `chrome.storage.local`, and syncs nothing.
 - It reads no cookies and intercepts no network traffic. It has neither the
   `cookies` nor the `webRequest` permission.
+- Its `debugger` permission could do both, so its use is bounded here too: it
+  sends no Chrome DevTools Protocol command other than `Page.getLayoutMetrics` and
+  `Page.captureScreenshot`, only to the tab being captured, and only after a
+  scripting call confirms Foxl's site access to that page. Any other use is a bug.
