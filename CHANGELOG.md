@@ -10,7 +10,8 @@ version pinned to the app's unified line; the split makes the two independent.
 
 ### Fixed
 
-- A screenshot of a tab that Chrome had discarded to save memory no longer fails with "clip must be a positive rectangle". After the tab reloads in the background it has no size until it is drawn, so a plain screenshot now selects it for a moment and switches back, as 0.8.1 did. A clip or full-page screenshot of such a tab says to take a plain screenshot first.
+- A screenshot of a tab in a minimized window fails at once with "The tab's window is minimized", instead of waiting up to 20 seconds (0.8.1 did not answer at all). Chrome draws nothing in a minimized window, so there is nothing to capture until it is restored.
+- When Chrome reports a tab with no size, a plain screenshot selects the tab for a moment and switches back, as 0.8.1 did, instead of failing with "clip must be a positive rectangle". Seen after a discarded tab reloaded in the background in an automated Chrome without a window size. A clip or full-page screenshot of such a tab says to take a plain screenshot first.
 
 ## v0.9.0 - October 26, 2026
 

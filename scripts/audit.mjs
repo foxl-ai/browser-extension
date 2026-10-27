@@ -146,7 +146,9 @@ for (const perm of declared) {
 /* Reverse direction: an API called without its permission fails at runtime. */
 const usedNamespaces = new Set([...allSource.matchAll(/chrome\.([a-zA-Z]+)\./g)].map((m) => m[1]));
 // `permissions` is the API that asks for an optional permission; it needs none itself.
-const NEEDS_NO_PERMISSION = new Set(['runtime', 'commands', 'i18n', 'extension', 'permissions']);
+// `windows` declares no permission (developer.chrome.com/docs/extensions/reference/api/windows);
+// only its tabs' url/title need `tabs`, and page-capture.js reads just the window state.
+const NEEDS_NO_PERMISSION = new Set(['runtime', 'commands', 'i18n', 'extension', 'permissions', 'windows']);
 
 for (const ns of usedNamespaces) {
   if (NEEDS_NO_PERMISSION.has(ns)) continue;

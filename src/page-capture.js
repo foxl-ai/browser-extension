@@ -158,6 +158,13 @@ async function capture(tabId, options, deadline) {
   };
   try {
     let tab = await bounded(() => chrome.tabs.get(tabId));
+    // Chrome draws nothing in a minimized window: the debugger capture failed ("image
+    // readback failed") or waited out the whole deadline, and 0.8.1 never answered (measured
+    // on Chrome 156). Say so at once; restoring the person's window is not ours to do.
+    const win = await bounded(() => chrome.windows.get(tab.windowId));
+    if (win.state === 'minimized') {
+      throw new Error("The tab's window is minimized, and Chrome draws nothing in a minimized window. Restore the window to take a screenshot.");
+    }
     if (tab.discarded) tab = await bounded(() => reloadDiscarded(tabId));
     const viewportOnly = !options.clip && !options.fullPage;
     if (tab.active && viewportOnly) return await bounded(() => captureVisible(tab, timers, deadline, false));
