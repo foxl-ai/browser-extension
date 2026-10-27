@@ -33,7 +33,7 @@ jobs:
       # The input queue's rules (one action at a time per tab, a deadline, Stop), including
       # a page stuck on a confirm() dialog. Zero dependencies, like the audit.
       - name: Unit tests
-        run: node --test scripts/input-queue.test.mjs
+        run: node --test scripts/*.test.mjs
 
       # Build the release zip and prove it is reproducible: build twice and
       # require identical bytes. A drift here means the "rebuild at the tag and

@@ -33,6 +33,11 @@ You need **Chrome 116 or newer** and [Foxl Desktop](https://github.com/foxl-ai/f
 
 > “Summarize this page and list the questions I should ask next.”
 
+The **Current page** control shows which page accompanies your message; click it
+to leave that page out. Follow-up questions use the recent conversation. **New
+chat** clears it. Settings includes Light, Dark, and System appearance, connection
+status, and the keyboard shortcut Chrome actually assigned.
+
 The store installation updates through Chrome. The extension ID is `ijlihobebaeangjiacfomjdkhlpbmlhi`.
 
 ### Install from source instead

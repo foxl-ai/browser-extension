@@ -238,6 +238,14 @@ async function connectToServer() {
       
       serverSocket.onclose = (event) => {
         console.log('[Foxl] Disconnected from server:', event.code, event.reason);
+        if (pendingPanelChat) {
+          chrome.runtime.sendMessage({
+            type: 'SERVER_RESPONSE',
+            data: { error: 'The connection was lost. Your task may still be running; check Foxl Desktop before trying again.' },
+            ...pendingPanelChat,
+          }).catch(() => {});
+          pendingPanelChat = null;
+        }
         clearPageSnapshots();
         serverSocket = null;
         // Forget the peer's version with the socket. Keeping it would attribute the
@@ -359,13 +367,28 @@ async function handleServerMessage(message) {
       // missed frame would leave the version unknown for the life of the socket.
       if (data && data.version) desktopVersion = String(data.version);
       break;
+
+    case 'pong':
+      // A normal keep-alive reply, not an unexpected server message.
+      break;
       
     case 'SERVER_RESPONSE':
-      // Chat response - broadcast to sidepanel
-      chrome.runtime.sendMessage({
-        type: 'SERVER_RESPONSE',
-        data: message.data
-      }).catch(() => {});
+      // The desktop has one uncorrelated response channel. Deliver only to
+      // the panel that sent this request, not every open Chrome window.
+      if (pendingPanelChat) {
+        chrome.runtime.sendMessage({
+          type: 'SERVER_RESPONSE',
+          data: message.data,
+          ...pendingPanelChat,
+        }).catch(() => {});
+        if (!['stream_start', 'stream_delta', 'tool'].includes(message.data?.type)) {
+          const completedTab = pendingPanelChat.tabId;
+          pendingPanelChat = null;
+          // The legacy side-panel chat endpoint does not send hide_indicators.
+          // A completed request must not leave its original page looking busy.
+          if (completedTab) hideAgentIndicators(completedTab);
+        }
+      }
       break;
       
     case 'browser_command':
@@ -1112,14 +1135,21 @@ function sendToServer(message) {
 /**
  * Send chat message to server via HTTP (fallback)
  */
-async function sendChatMessage(message, tabId) {
+let pendingPanelChat = null;
+
+async function sendChatMessage(message, tabId, panelId, requestId) {
+  if (pendingPanelChat) {
+    return { success: false, error: 'Foxl is working in another side panel. Let that request finish, then try again.' };
+  }
   // Try WebSocket first
   if (serverSocket?.readyState === WebSocket.OPEN) {
-    serverSocket.send(JSON.stringify({
-      type: 'chat',
-      message,
-      tabId
-    }));
+    pendingPanelChat = { panelId, requestId, tabId };
+    try {
+      serverSocket.send(JSON.stringify({ type: 'chat', message, tabId }));
+    } catch (error) {
+      pendingPanelChat = null;
+      return { success: false, error: error.message };
+    }
     return { success: true, pending: true };
   }
   
@@ -1259,7 +1289,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       case 'SEND_TO_SERVER':
         if (message.data?.type === 'chat' && message.data?.message) {
-          const result = await sendChatMessage(message.data.message, message.data.tabId);
+          const result = await sendChatMessage(message.data.message, message.data.tabId, message.data.panelId, message.data.requestId);
           
           if (result.pending) {
             // Response will come via WebSocket
@@ -1328,6 +1358,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // Tab closed — clean up from contexts
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes.serverUrl) return;
+  clearDiscoveredUrl();
+  // A live socket belongs to the old URL. Closing it takes the normal reconnect
+  // path, which reads the saved setting again and reports an interrupted request.
+  if (serverSocket) serverSocket.close();
+  else connectToServer();
+});
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   clearPageSnapshots(tabId);
   if (tabContexts.has(tabId)) {

@@ -1,76 +1,72 @@
 # Chrome Web Store artwork
 
-The gallery uses the shipping extension's HTML, CSS and JavaScript. The capture
-server supplies a deterministic Chrome API fixture and example page data; it does
-not redraw the side panel, change its styles, or connect to a running Foxl Desktop.
-The example pages are local, functional demo pages, not customer accounts.
+All product imagery is captured from the loaded Foxl 0.10.0 development extension,
+connected to the real Foxl Desktop 0.9.3 app. Requests were actually submitted and
+answered on public NASA pages. No Chrome API substitute, invented conversation,
+simulated website, or redrawn product interface is used.
+
+## Capture and compose
+
+1. Load the repository through Chrome’s **Load unpacked** flow and open Foxl Desktop.
+2. Use a separate Chrome window containing public pages only. Set the extension to
+   **Light** appearance. Keep the actual text and controls at their normal size.
+3. Run the task. Verify its real result, current-page context, and connection state.
+4. Capture the native Chrome window at 2x display scale. Retain the original bytes.
+5. Inspect every capture for personal tabs, clipped text, hover obstructions, and
+   stale UI. Store the reviewed originals in `source/captures/` and record their
+   hashes, dimensions, source URLs, and rectangular crops in `provenance.json`.
+6. Compose the gallery and promotional images:
+
+```sh
+python3 scripts/compose-store-artwork.py
+```
+
+A single image can be previewed without replacing the final assets:
+
+```sh
+python3 scripts/compose-store-artwork.py --preview 01-browser
+```
+
+The compositor crops and uniformly scales native pixels. It adds marketing text,
+backgrounds, borders, and shadows around those pixels. It does not draw buttons,
+replace message text, or reconstruct browser chrome. Page and side-panel regions
+can be framed separately so that the interface remains readable. Each source is
+identified in the capture manifest. The nebula image on slide 1 comes from the
+same public page in the native welcome capture; its panel comes from the actual
+completed summary capture. The navigation image pairs its completed response with
+the same NASA mission page from the later follow-up capture.
+
+The conversation panels preserve 16px body text at the 1280px upload size. Settings
+uses a larger crop of the actual connection and appearance cards. The palette,
+Geist font, neutral surfaces, and restrained blue accents follow Foxl. Product
+logos are not repeated as decoration. All final images use Light appearance.
 
 ## Files
 
-- `gallery.en.json`: gallery order, marketing copy and captions.
-- `fixtures.json`: example requests, responses and page content.
-- `source/`: the presentation template and Chrome API fixture.
-- `screenshots/en/`: the five 1280 × 800 upload images.
-- `promo/`: the 440 × 280 small tile and 1400 × 560 marquee.
-- `review/`: contact sheet and source/asset manifest.
+- `gallery.en.json`: order, marketing copy, captions, and capture names.
+- `source/captures/`: reviewed native JPEG originals and provenance.
+- `screenshots/en/`: five 1280 × 800 RGB PNG upload images.
+- `promo/`: 440 × 280 small tile and 1400 × 560 marquee.
+- `review/contact-sheet.png`: overview for visual review, never uploaded as a screenshot.
+- `review/render-manifest.json`: source and output hashes.
+- `review/foxl-chrome-store-artwork.zip`: local convenience bundle for upload.
+- `QUALITY.md`: the release’s functional and visual checks.
 
-Start the local capture server from the repository root:
+The native screenshot tool returns JPEG. PNG export does not claim to recover
+compression detail; the original resolution is retained for traceability. The
+font is bundled locally under its SIL Open Font License in `brand/OFL.txt`.
 
-```sh
-node scripts/store-preview.mjs
-```
+## Review and submission
 
-It binds only to `127.0.0.1` on an available port and prints the review URL. Visit
-the links in that review page to inspect each artwork at its upload dimensions.
-The server reads the shipping files directly, so a future UI change appears in
-the next capture without maintaining a second interface.
+The previous fixture-based artwork and capture server have been retired. Never
+reuse an older extracted upload folder. Generate and inspect the current seven
+files, then upload screenshots in numerical order and promotional images into
+their separate slots. The extension package for this redesign is **0.10.0**.
 
-Capture each artwork at the indicated size after
-`html[data-artwork-ready="true"]` appears. Save the unmodified captures as
-`review/captures/01-browser.jpg` through `05-desktop.jpg`, plus `small.jpg` and
-`marquee.jpg`. PNG inputs with the same stems are supported too. Then export:
+Check that all visible behavior matches the package, save the listing, submit it
+for Chrome Web Store review, and verify the dashboard’s resulting review status.
+Do not call a submission published before the dashboard confirms publication.
+The artwork sources are excluded from the extension ZIP by the build allowlist.
 
-```sh
-python3 scripts/finalize-store-artwork.py
-```
-
-This uses Pillow to decode and validate all seven inputs, export opaque RGB PNGs
-without rescaling, and produce a contact sheet, source hashes and an upload ZIP.
-The raw JPEGs returned by browser capture are local intermediates; PNG export
-does not claim to restore image detail lost by that transport.
-
-The Chrome APIs are substituted only on the capture routes. No service worker
-runs there, no installed extension settings are changed, and no desktop ports or
-personal Foxl data are accessed.
-
-The image files and this directory are outside the release ZIP's allowlist.
-Updating store artwork does not require a new extension version.
-
-## Design and truthfulness
-
-The design uses Foxl's official outlined logo and Geist typeface, with Ink, Paper,
-Mist and Slate surfaces. Blue remains a small brand accent. The source assets
-come from `foxl-ai/pilot/site/landing/public/brand/` and the shipped fonts.
-
-Each screenshot says that Foxl Desktop is required. Example conversations use
-only existing features: plain-text chat, page reading, tab context, form input,
-and the actual activity indicator with its Stop Foxl button. They are illustrative
-workflows, not claims about a measured model run. There are no fabricated reviews,
-ratings, customer counts, provider promises or speed claims.
-
-The fifth image includes the exact first-run state a person sees without the
-desktop app. The screenshot set does not imply the extension works on its own.
-
-## Store specifications
-
-Checked on 2026-10-27 against Google's Chrome Web Store image documentation:
-https://developer.chrome.com/docs/webstore/images
-
-- Five screenshots, 1280 × 800, opaque RGB PNG.
-- Small promotional tile, 440 × 280, opaque RGB PNG.
-- Marquee promotional image, 1400 × 560, opaque RGB PNG.
-- The promotional tiles communicate the brand with minimal copy.
-
-Upload the numbered gallery in order. The small promotional tile and marquee go
-in their own slots, not in the screenshot gallery. Keep the extension icon as the
-shipping icon. Review the rendered files before submitting the listing update.
+Google’s current image requirements are documented at
+https://developer.chrome.com/docs/webstore/images.

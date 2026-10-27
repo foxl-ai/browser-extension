@@ -1,0 +1,90 @@
+{
+  "captureDate": "2026-10-27",
+  "extensionVersion": "0.10.0",
+  "desktopVersion": "0.9.3",
+  "appearance": "Light",
+  "method": "Native macOS Chrome window capture, 2x display scale",
+  "transport": "The native tool returned JPEG bytes. PNG export does not restore JPEG detail.",
+  "captures": {
+    "summary.jpg": {
+      "sha256": "0a98a8147888367220372a8e2b35374fa59f960b1d8e71b9b8d5be3169a209b2",
+      "size": [
+        3010,
+        1664
+      ],
+      "source": "Native loaded extension with an actual running Foxl Desktop",
+      "pageUrl": "https://science.nasa.gov/asset/webb/cosmic-cliffs-in-the-carina-nebula-nircam-image/",
+      "pageCrop": [
+        44,
+        510,
+        2204,
+        1320
+      ],
+      "request": "Summarize this page in 3 short bullet points."
+    },
+    "welcome.jpg": {
+      "sha256": "fbd628693f376a923f783f9a1ad062fb47f75348cd2a9c44d6d6fd641ed2078e",
+      "size": [
+        3010,
+        1664
+      ],
+      "source": "Native loaded extension with an actual running Foxl Desktop",
+      "pageUrl": "https://science.nasa.gov/asset/webb/cosmic-cliffs-in-the-carina-nebula-nircam-image/",
+      "pageCrop": [
+        44,
+        510,
+        2204,
+        1320
+      ]
+    },
+    "settings.jpg": {
+      "sha256": "7076f25ed12f338614449476bd4acf59aab6a1913cf16cbc7f473ad4af44611f",
+      "size": [
+        3010,
+        1664
+      ],
+      "source": "Native loaded extension with an actual running Foxl Desktop",
+      "pageUrl": "chrome-extension://anjkjcbadgfdjfinljaagjbpipnhfkbb/options.html",
+      "settings": "Actual connected state, Light selected; no saved server URL was changed for capture."
+    },
+    "navigation.jpg": {
+      "sha256": "890014640c271746ff6eb48486919ae51d1b142228680d6726883b9e4733d731",
+      "size": [
+        3010,
+        1664
+      ],
+      "source": "Native loaded extension with an actual running Foxl Desktop",
+      "pageUrl": "https://science.nasa.gov/mission/europa-clipper/",
+      "pageCrop": [
+        44,
+        640,
+        2204,
+        1450
+      ],
+      "request": "Use NASA\u2019s search box to find Europa Clipper. Open its mission page in this tab, then give me the launch date and destination in 2 bullets.",
+      "pageRegionInArtwork": "follow-up.jpg, the same public NASA mission page after completion"
+    },
+    "follow-up.jpg": {
+      "sha256": "16d7fc61743ec4288f2c14a3be229bb39b816e56b32a72860444b7af225b35e3",
+      "size": [
+        3010,
+        1664
+      ],
+      "source": "Native loaded extension with an actual running Foxl Desktop",
+      "pageUrl": "https://science.nasa.gov/mission/europa-clipper/",
+      "pageCrop": [
+        44,
+        640,
+        2204,
+        1450
+      ],
+      "requests": [
+        "Give me the launch date and destination in 2 bullets.",
+        "Put those facts in one sentence."
+      ]
+    }
+  },
+  "credits": {
+    "cosmicCliffs": "Image: NASA, ESA, CSA, STScI"
+  }
+}

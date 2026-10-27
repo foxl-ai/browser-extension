@@ -6,6 +6,32 @@ This extension has its own version line, independent of the Foxl Desktop release
 number. It used to ship inside the Foxl monorepo, where a script kept its manifest
 version pinned to the app's unified line; the split makes the two independent.
 
+## v0.10.0 - October 27, 2026
+
+The Chrome Web Store goes from 0.9.0 to this version: it also carries the v0.9.1 fixes below, which were not published to the store on their own.
+
+### Changed
+
+- Redesigned the side panel and settings with Foxl's Geist typography, neutral
+  surfaces, light/dark appearance, and rounded composer with a circular send button.
+- Enlarged conversation and input text to 16px. Added editable starter prompts
+  and a new-chat action.
+- Replaced the unrelated global tab strip with a clearly labelled current-page
+  control. It follows the panel's own Chrome window and can be excluded from a request.
+
+### Fixed
+
+- "This page" requests carry the actual selected page at send time, including its
+  tab ID, title and URL, instead of relying on a desktop task's old browser context.
+- Responses go back only to the side panel that sent the request. A second panel
+  cannot start a conflicting request on the desktop's uncorrelated response channel.
+- Enter during Korean/Japanese IME composition no longer submits unfinished text.
+- A lost connection ends the waiting indicator with an explicit error.
+- Follow-up questions include the recent visible conversation. New chat clears it.
+- Saved connection changes reconnect the worker to the new address, and the
+  connection check reports the worker's actual connection.
+- A completed side-panel request clears the activity indicator on its page.
+
 ## v0.9.1 - October 27, 2026
 
 ### Fixed
