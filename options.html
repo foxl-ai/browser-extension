@@ -4,43 +4,53 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Foxl Settings</title>
+  <link rel="stylesheet" href="styles/foxl.css">
   <link rel="stylesheet" href="styles/options.css">
+  <script src="src/theme.js" defer></script>
 </head>
 <body>
-  <div class="container">
+  <main class="container">
     <div class="page-header">
-      <img src="icons/icon.svg" alt="Foxl" width="48" height="48">
-      <h1>Foxl</h1>
+      <img src="icons/foxl-mark.svg" alt="" width="48" height="48">
+      <h1 translate="no">Foxl</h1>
     </div>
-    <p class="subtitle">Browser extension settings</p>
+    <p class="subtitle">Your browser, connected.</p>
 
     <div class="section">
       <h2 class="section-title">Connection</h2>
-      <p class="section-description">Connect to your Foxl server for browser automation.</p>
+      <p class="section-description">Foxl Desktop runs your agent. Open it on this computer to connect automatically.</p>
       
-      <div class="status">
+      <div class="status" role="status">
         <div class="status-dot" id="statusDot"></div>
-        <span id="statusText">Checking...</span>
-      </div>
-
-      <div class="form-group">
-        <label>
-          Server URL
-          <span class="label-hint">Leave empty for auto-discovery (port 13847 / 3847)</span>
-        </label>
-        <input 
-          type="url" 
-          id="serverUrl" 
-          placeholder="Auto-detect"
-        >
+        <span id="statusText">Checking…</span>
       </div>
 
       <div class="actions">
-        <button class="button" id="saveButton">Save</button>
-        <button class="button button-secondary" id="testButton">Test</button>
+        <button class="button button-secondary" id="testButton" type="button">Check connection</button>
       </div>
+      <details class="advanced" id="advancedConnection">
+        <summary>Custom connection</summary>
+        <div class="form-group">
+          <label for="serverUrl">Server URL</label>
+          <p class="label-hint" id="serverUrlHint">Leave empty to find Foxl Desktop automatically on ports 13847 or 3847.</p>
+          <input type="url" id="serverUrl" name="serverUrl" placeholder="Auto-detect…" aria-describedby="serverUrlHint" autocomplete="off" spellcheck="false">
+        </div>
+        <button class="button" id="saveButton" type="button">Save connection</button>
+      </details>
+      <div id="message" style="display: none;" role="status"></div>
+    </div>
 
-      <div id="message" style="display: none;"></div>
+    <div class="section appearance-section">
+      <div>
+        <h2 class="section-title">Appearance</h2>
+        <p class="section-description">Make yourself at home.</p>
+      </div>
+      <label class="sr-only" for="appearance">Appearance</label>
+      <select id="appearance" name="appearance">
+        <option value="system">System</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
     </div>
 
     <div class="section">
@@ -58,14 +68,14 @@
     <div class="section">
       <h2 class="section-title">About</h2>
       <p class="about-text">
-        Foxl is a 24/7 AI agent that automates browser tasks.
-        It reads pages, clicks elements, fills forms, and navigates on your behalf.
+        Read pages, follow links, and get things done in the browser you already use.
+        Requires Foxl Desktop.
       </p>
       <p class="version-text">
         Version <span id="version"></span>
       </p>
     </div>
-  </div>
+  </main>
 
   <script src="src/options.js"></script>
 </body>

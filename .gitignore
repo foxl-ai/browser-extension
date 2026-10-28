@@ -17,3 +17,9 @@ CLAUDE.md
 
 # macOS
 .DS_Store
+
+# Local references and raw browser captures. Final store PNGs and their source
+# templates are committed; the upload ZIP is a local convenience.
+.store-research/
+store/review/captures/
+store/review/foxl-chrome-store-artwork.zip

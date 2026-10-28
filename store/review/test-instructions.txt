@@ -1,0 +1,38 @@
+Foxl 0.10.0 review instructions
+
+This extension is a companion to Foxl Desktop. The extension has no separate
+account or sign-in. Foxl Desktop must be installed and running on the same
+computer for the default local connection. Get the app at https://foxl.ai.
+Agent tasks also require a model connection configured in Foxl Desktop.
+
+Connection and appearance
+1. Open Foxl Desktop, then open the extension from the Chrome toolbar.
+2. The side panel should report "Connected to Desktop". If Desktop is not running,
+   the panel explains the requirement or shows a disconnected state.
+3. Open the panel's Settings button and select Light. Use Check connection to
+   confirm the real connection. The optional custom connection can stay unchanged.
+
+Read a page and ask a follow-up
+1. Open https://science.nasa.gov/mission/europa-clipper/ in a normal Chrome tab.
+2. Confirm that Current page shows the NASA page.
+3. Ask: "Give me the launch date and destination in 2 bullets."
+4. After the reply, ask: "Put those facts in one sentence."
+5. The follow-up should use the preceding answer. New chat clears the panel's
+   visible conversation. The Current page control can exclude the page's title
+   and URL from the next message; prior conversation content remains available.
+
+Browser actions
+1. Open a public NASA page with its search control.
+2. Ask: "Use NASA's search box to find Europa Clipper. Open its mission page in
+   this tab, then give me the launch date and destination in 2 bullets."
+3. Observe the browser navigation and wait for the completed response.
+
+These tasks and the attached gallery were verified with Foxl Desktop 0.9.3 and
+the loaded 0.10.0 development extension. That Desktop version returns side-panel
+answers on completion, so a request can take time without streaming text.
+
+This update redesigns the side panel and settings, adds appearance preferences,
+keeps recent conversation context for follow-ups, and replaces the store gallery
+with actual Light-mode captures. It requests the same seven permissions as 0.9.0.
+The gallery's headings are outside the captured product UI; the shown messages
+and browser results came from real tasks.

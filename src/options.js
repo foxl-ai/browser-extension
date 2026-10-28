@@ -30,7 +30,8 @@ if (shortcutsList && chrome.commands?.getAll) {
     shortcutsList.innerHTML = '';
     for (const cmd of commands) {
       const label = COMMAND_LABELS[cmd.name] || cmd.description || cmd.name;
-      const row = document.createElement('div');
+      const row = document.createElement('button');
+      row.type = 'button';
       row.className = 'shortcut shortcut-clickable';
       row.title = 'Click to change in Chrome shortcuts settings';
       row.addEventListener('click', openShortcutsTab);
@@ -66,10 +67,12 @@ if (openShortcutsBtn) {
 }
 
 // Load saved settings
-chrome.storage.local.get(['serverUrl'], (result) => {
+chrome.storage.local.get(['serverUrl', 'appearance'], (result) => {
   if (result.serverUrl) {
     serverUrlInput.value = result.serverUrl;
+    document.getElementById('advancedConnection').open = true;
   }
+  document.getElementById('appearance').value = result.appearance || 'system';
   // If no saved URL, leave empty (auto-detect mode)
   checkConnection();
 });
@@ -79,19 +82,23 @@ async function checkConnection() {
   try {
     const response = await chrome.runtime.sendMessage({ type: 'GET_SERVER_STATUS' });
     updateStatus(response.connected, response.serverUrl);
+    return Boolean(response.connected);
   } catch (err) {
     updateStatus(false);
+    return false;
   }
 }
 
 function updateStatus(connected, serverUrl) {
   statusDot.classList.toggle('connected', connected);
   if (connected && serverUrl) {
-    statusText.textContent = `Connected to ${serverUrl}`;
+    statusText.textContent = 'Connected to Foxl Desktop';
+    statusText.title = serverUrl;
   } else if (connected) {
-    statusText.textContent = 'Connected to Foxl server';
+    statusText.textContent = 'Connected to Foxl Desktop';
   } else {
-    statusText.textContent = 'Not connected';
+    statusText.textContent = 'Open Foxl Desktop to connect';
+    statusText.removeAttribute('title');
   }
 }
 
@@ -107,15 +114,21 @@ function showMessage(text, type) {
 
 // Save settings
 saveButton.addEventListener('click', async () => {
+  serverUrlInput.setCustomValidity('');
+  if (serverUrlInput.value.trim() && !/^https?:\/\//i.test(serverUrlInput.value.trim())) {
+    serverUrlInput.setCustomValidity('Use an http:// or https:// server URL.');
+  }
+  if (!serverUrlInput.reportValidity()) return;
   const serverUrl = serverUrlInput.value.trim();
+  saveButton.disabled = true;
 
   try {
     if (serverUrl) {
       await chrome.storage.local.set({ serverUrl });
-      showMessage('Settings saved. Using: ' + serverUrl, 'success');
+      showMessage('Connection saved. Reconnecting…', 'success');
     } else {
       await chrome.storage.local.remove('serverUrl');
-      showMessage('Settings saved. Using auto-discovery (port 13847 / 3847)', 'success');
+      showMessage('Connection saved. Finding Foxl Desktop…', 'success');
     }
     
     // Reconnect with new URL
@@ -123,48 +136,34 @@ saveButton.addEventListener('click', async () => {
     setTimeout(checkConnection, 1000);
   } catch (err) {
     showMessage('Failed to save settings: ' + err.message, 'error');
+  } finally {
+    saveButton.disabled = false;
+  }
+});
+serverUrlInput.addEventListener('input', () => serverUrlInput.setCustomValidity(''));
+
+document.getElementById('appearance').addEventListener('change', async (event) => {
+  try {
+    await chrome.storage.local.set({ appearance: event.target.value });
+  } catch (error) {
+    showMessage('Could not save appearance: ' + error.message, 'error');
   }
 });
 
 // Test connection
 testButton.addEventListener('click', async () => {
-  const serverUrl = serverUrlInput.value.trim();
-  
-  // If no URL, test auto-discovery ports
-  if (!serverUrl) {
-    const ports = [13847, 3847];
-    for (const port of ports) {
-      const url = `http://localhost:${port}`;
-      try {
-        const response = await fetch(`${url}/api/health`);
-        if (response.ok) {
-          showMessage(`Found server at ${url}`, 'success');
-          updateStatus(true, url);
-          // Trigger WebSocket connection in service worker
-          await chrome.runtime.sendMessage({ type: 'CONNECT_TO_SERVER' });
-          return;
-        }
-      } catch (_) {}
-    }
-    showMessage('No server found on port 13847 or 3847', 'error');
-    updateStatus(false);
-    return;
-  }
-
+  testButton.disabled = true;
+  testButton.textContent = 'Checking…';
   try {
-    const response = await fetch(`${serverUrl}/api/health`);
-    if (response.ok) {
-      showMessage('Connection successful!', 'success');
-      updateStatus(true, serverUrl);
-      // Trigger WebSocket connection in service worker
-      await chrome.runtime.sendMessage({ type: 'CONNECT_TO_SERVER' });
-    } else {
-      showMessage('Server responded with error: ' + response.status, 'error');
-      updateStatus(false);
-    }
+    await chrome.runtime.sendMessage({ type: 'CONNECT_TO_SERVER' });
+    const connected = await checkConnection();
+    showMessage(connected ? 'Connected to Foxl Desktop.' : 'Open Foxl Desktop and try again.', connected ? 'success' : 'error');
   } catch (err) {
     showMessage('Failed to connect: ' + err.message, 'error');
     updateStatus(false);
+  } finally {
+    testButton.disabled = false;
+    testButton.textContent = 'Check connection';
   }
 });
 

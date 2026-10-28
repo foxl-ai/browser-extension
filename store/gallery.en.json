@@ -1,0 +1,55 @@
+{
+  "locale": "en",
+  "version": "0.10.0",
+  "requirement": "Requires Foxl Desktop",
+  "theme": "light",
+  "slides": [
+    {
+      "id": "01-browser",
+      "capture": "summary.jpg",
+      "pageCapture": "welcome.jpg",
+      "eyebrow": "A LITTLE HELP, RIGHT HERE",
+      "headline": ["Less busywork.", "More curiosity."],
+      "description": ["Read, ask, and keep going.", "Foxl works beside the page."],
+      "layout": "page-and-panel",
+      "alt": "A genuine Foxl Desktop response summarizing NASA's Cosmic Cliffs page in the redesigned light side panel."
+    },
+    {
+      "id": "02-understand",
+      "capture": "follow-up.jpg",
+      "eyebrow": "KEEP THE THREAD",
+      "headline": ["One answer.", "The next question."],
+      "description": ["Ask a follow-up.", "Keep your place on the page."],
+      "layout": "page-and-panel",
+      "alt": "A genuine follow-up conversation in Foxl, with recent messages carried forward."
+    },
+    {
+      "id": "03-act",
+      "capture": "navigation.jpg",
+      "pageCapture": "follow-up.jpg",
+      "eyebrow": "FROM ASKING TO DOING",
+      "headline": ["Ask for the task.", "Watch it happen."],
+      "description": ["Search, follow links, and read.", "In the browser you already use."],
+      "layout": "page-and-panel",
+      "alt": "The actual page reached by Foxl during a public NASA search, beside its genuine response."
+    },
+    {
+      "id": "04-start",
+      "capture": "welcome.jpg",
+      "eyebrow": "AN EASY PLACE TO BEGIN",
+      "headline": ["What would you", "like to get done?"],
+      "description": ["Start with a page or a question.", "Make the next step a little easier."],
+      "layout": "welcome",
+      "alt": "Foxl's real light welcome screen, editable starter prompts, current-page control, and rounded message composer."
+    },
+    {
+      "id": "05-desktop",
+      "capture": "settings.jpg",
+      "eyebrow": "MAKE YOURSELF AT HOME",
+      "headline": ["Your agent.", "Your space."],
+      "description": ["A clear connection.", "Settings that stay simple."],
+      "layout": "settings",
+      "alt": "The actual connected Foxl Settings page, with its Light appearance preference selected."
+    }
+  ]
+}

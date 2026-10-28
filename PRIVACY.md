@@ -5,7 +5,7 @@ services have their own policy at <https://foxl.ai/privacy>; that distinction
 matters here: the extension hands page data to its configured Foxl server, and the
 desktop app decides what context to send to the model or connected service.
 
-Last updated: October 26, 2026.
+Last updated: October 27, 2026.
 
 ## The short version
 
@@ -29,8 +29,9 @@ about them is more useful than a reassuring summary:
 | Page content: text, labels, field values, and structure of the pages you point the agent at | So the agent can understand a page and find the element to act on | The configured Foxl server |
 | Screenshots of the requested tab, including a rectangle or the full document | Visual confirmation of what the page looks like | The configured Foxl server |
 | Tab URLs and titles | So a task can move between sites and the agent knows where it is | The configured Foxl server |
+| Your side-panel messages and recent replies | To answer your request and follow-up questions | The configured Foxl server |
 | Actions the agent performs: clicks, typed text, navigation | They are the work itself | Performed in your browser |
-| Your settings: the server URL | So you do not re-enter it | `chrome.storage.local`, on your machine only |
+| Your settings: the server URL and appearance preference | So you do not re-enter them | `chrome.storage.local`, on your machine only |
 
 Page content can include whatever is on the page, and that may be personal:
 an email in a webmail tab, an order in a shop, a form you have partly filled in.
@@ -97,6 +98,12 @@ clears the relevant baselines. They are never written to extension storage.
 
 Screenshots pass through the extension without being written to disk by it.
 Settings persist in `chrome.storage.local`; removing the extension deletes those.
+
+The visible side-panel conversation stays in that panel's memory. Follow-up
+requests include up to 20 recent messages within a 32 KB text budget. New chat or
+closing the panel clears this conversation; it is not written to extension storage.
+The current-page control can exclude the selected page's title and URL from the
+next request. It does not remove information already present in the conversation.
 
 Anything the desktop app retains after receiving this data is covered by
 <https://foxl.ai/privacy>.

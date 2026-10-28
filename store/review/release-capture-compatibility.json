@@ -1,0 +1,22 @@
+{
+  "version": "0.10.0",
+  "includedRelease": "v0.9.1",
+  "includedReleaseCommit": "79fa68b997d2500e3f0145d787db77259b764729",
+  "captureSourceManifest": "store/review/render-manifest.json",
+  "captureRuntimeMatchesCommit": "f5ba8f103e23e7794466f2aeb48c496842e5d738",
+  "originalCaptureMetadataPreserved": true,
+  "rawCaptureHashesMatched": 5,
+  "sourceFilesCompared": 21,
+  "unchangedSourceFiles": 20,
+  "changedSources": [
+    {
+      "path": "src/page-capture.js",
+      "capturedSha256": "9ae1c8ff1147250be3e9b7609a479f9d3cb4cce29bcda60d0e4850cee6a861de",
+      "releaseSha256": "bf92146bdf07d5b901a3b4b082e38ec44d469888779a9d728c2f77beb3ce054d"
+    }
+  ],
+  "visualSourcesChanged": false,
+  "reasonCapturesRemainCurrent": "Only src/page-capture.js changed after the real Light captures. It adds the v0.9.1 minimized-window error and zero-size viewport screenshot fallback. All captured panel/settings markup, CSS, text, assets, context and worker code remain byte-identical. The capture backend is byte-identical to the v0.9.1 release.",
+  "archiveEntriesMatchSource": 27,
+  "sha256": "04b8a3f1237f300b0e95e68b7a333196e5ee81dd79cd9b5836f2282345065621"
+}

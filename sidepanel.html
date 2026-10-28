@@ -4,81 +4,77 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Foxl</title>
+  <link rel="stylesheet" href="styles/foxl.css">
   <link rel="stylesheet" href="styles/sidepanel.css">
+  <script src="src/theme.js" defer></script>
 </head>
 <body>
-  <div class="header">
-    <div class="header-left">
-      <div class="status-dot" id="statusDot" title="Disconnected"></div>
-      <span class="model-label" id="modelLabel"></span>
-    </div>
-    <div class="header-right">
-      <button class="icon-button" id="settingsBtn" title="Settings">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-      </button>
-    </div>
-  </div>
-
-  <div class="tab-bar" id="tabBar" style="display:none">
-    <div class="tab-bar-inner" id="tabBarInner"></div>
-  </div>
-
-  <!--
-    THE SCREEN SOMEBODY WHO INSTALLED THIS FROM A STORE ACTUALLY SEES.
-
-    Until this existed, the entire failure UI was four console.error calls and a grey
-    dot whose `title` said "Disconnected" - and most people who install a browser
-    extension from a store do NOT have Foxl Desktop, because the extension talks only
-    to a local websocket on 13847/3847. So the default first-run experience was a
-    chat box that silently did nothing, which is both the 1-star review and the store
-    rejection, from one cause.
-  -->
-  <div class="setup-state" id="setupState" style="display:none">
-    <div class="setup-icon">
-      <img src="icons/icon.svg" alt="Foxl" width="40" height="40">
-    </div>
-    <h2 class="setup-title" id="setupTitle">Foxl Desktop is required</h2>
-    <p class="setup-body" id="setupBody">
-      This extension is the browser half of Foxl. It connects to the Foxl Desktop app
-      running on this computer - nothing is sent to a Foxl server from here.
-    </p>
-    <a class="setup-cta" id="setupCta" href="https://foxl.ai" target="_blank" rel="noreferrer">Get Foxl Desktop</a>
-    <!--
-      The RECONNECTING state's escape hatch. It is a quiet link rather than the CTA
-      above because "your desktop is asleep" and "you removed your desktop" cannot be
-      told apart from here, and shouting the download at somebody whose app is merely
-      closed reads as "your install is broken". Without it, a person who uninstalled
-      the desktop has no route back to this panel's install screen at all.
-    -->
-    <a class="setup-link" id="setupGone" href="https://foxl.ai" target="_blank" rel="noreferrer" style="display:none">Removed Foxl Desktop? Install it again</a>
-    <button class="setup-link" id="setupRetry">Retry connection</button>
-    <button class="setup-link" id="setupSettings">Set a custom port</button>
-  </div>
-
-  <div class="messages" id="messages">
-    <div class="empty-state">
-      <div class="empty-state-icon">
-        <img src="icons/icon.svg" alt="Foxl" width="48" height="48">
+  <header class="header">
+    <div class="identity">
+      <div class="identity-copy">
+        <h1 translate="no">Foxl</h1>
+        <div class="connection" id="connectionStatus" role="status">
+          <span class="status-dot" id="statusDot" aria-hidden="true"></span>
+          <span id="connectionLabel">Connecting…</span>
+        </div>
       </div>
-      <p>Ask anything or automate browser tasks.</p>
     </div>
-  </div>
-
-  <div class="input-container">
-    <div class="input-wrapper">
-      <textarea
-        class="input-field"
-        id="inputField"
-        placeholder="Message Foxl..."
-        rows="1"
-        autocomplete="off"
-      ></textarea>
-      <button class="send-button" id="sendButton" title="Send">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+    <div class="header-actions">
+      <button class="icon-button" id="newChatBtn" type="button" aria-label="New chat" title="New chat" disabled>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M16 3a2.12 2.12 0 0 1 3 3l-9 9-4 1 1-4Z"/></svg>
+      </button>
+      <button class="icon-button" id="settingsBtn" type="button" aria-label="Settings" title="Settings">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z"/><circle cx="12" cy="12" r="3"/></svg>
       </button>
     </div>
-  </div>
+  </header>
 
-  <script src="src/sidepanel.js"></script>
+  <main class="thread" id="thread">
+    <section class="setup-state" id="setupState" hidden aria-labelledby="setupTitle">
+      <h2 id="setupTitle">Meet your browser’s other half.</h2>
+      <p id="setupBody">Open Foxl Desktop to get started. Your agent connects here so you can work beside the page.</p>
+      <a class="setup-cta" id="setupCta" href="https://foxl.ai" target="_blank" rel="noreferrer">Get Foxl Desktop</a>
+      <button class="text-button" id="setupRetry" type="button">Try connecting again</button>
+      <button class="text-button" id="setupSettings" type="button">Connection settings</button>
+      <a class="text-button" id="setupGone" href="https://foxl.ai" target="_blank" rel="noreferrer" hidden>Install Foxl Desktop again</a>
+    </section>
+
+    <section class="welcome" id="welcome" aria-labelledby="welcomeTitle">
+      <h2 id="welcomeTitle">A little less busywork.</h2>
+      <p>Read, find, and get things done.<br>Right here in your browser.</p>
+      <div class="suggestions" aria-label="Try asking Foxl">
+        <button class="suggestion" type="button" data-prompt="Summarize this page in 3 short bullet points." data-needs-page>
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3M8 7h8M8 12h5M8 17h8"/><path d="m17 2 1.4 3.6L22 7l-3.6 1.4L17 12l-1.4-3.6L12 7l3.6-1.4Z"/></svg>
+          <span>Summarize this page</span><span class="suggestion-arrow" aria-hidden="true">↗</span>
+        </button>
+        <button class="suggestion" type="button" data-prompt="Pull the key facts from this page into a short, clear list." data-needs-page>
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+          <span>Pull out the key facts</span><span class="suggestion-arrow" aria-hidden="true">↗</span>
+        </button>
+        <button class="suggestion" type="button" data-prompt="Help me compare the pages open in this browser window. Ask me what matters most before you start.">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="14" height="14" rx="2"/><path d="M7 3h12a2 2 0 0 1 2 2v12"/></svg>
+          <span>Compare a few tabs</span><span class="suggestion-arrow" aria-hidden="true">↗</span>
+        </button>
+      </div>
+    </section>
+    <div class="messages" id="messages" role="log" aria-label="Conversation" aria-live="polite" aria-relevant="additions text"></div>
+  </main>
+
+  <footer class="input-container">
+    <button class="page-context" id="pageContext" type="button" aria-pressed="true" hidden>
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 8h18M8 3v5"/></svg>
+      <span class="page-context-copy"><span class="page-context-label" id="pageContextLabel">Current page</span><span class="page-context-title" id="pageContextTitle"></span></span>
+      <svg class="context-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+    </button>
+    <form class="input-wrapper" id="composer">
+      <label class="sr-only" for="inputField">Message Foxl</label>
+      <textarea class="input-field" id="inputField" name="message" placeholder="Message Foxl…" rows="1" autocomplete="off" aria-describedby="composerHint" disabled></textarea>
+      <button class="send-button" id="sendButton" type="submit" aria-label="Send message" title="Send message" disabled>
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>
+      </button>
+    </form>
+    <span class="sr-only" id="composerHint">Enter to send. Shift+Enter for a new line.</span>
+  </footer>
+  <script src="src/sidepanel.js" type="module"></script>
 </body>
 </html>
