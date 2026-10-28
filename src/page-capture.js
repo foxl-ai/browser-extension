@@ -158,6 +158,13 @@ async function capture(tabId, options, deadline) {
   };
   try {
     let tab = await bounded(() => chrome.tabs.get(tabId));
+    // Chrome draws nothing in a minimized window: the debugger capture failed ("image
+    // readback failed") or waited out the whole deadline, and 0.8.1 never answered (measured
+    // on Chrome 156). Say so at once; restoring the person's window is not ours to do.
+    const win = await bounded(() => chrome.windows.get(tab.windowId));
+    if (win.state === 'minimized') {
+      throw new Error("The tab's window is minimized, and Chrome draws nothing in a minimized window. Restore the window to take a screenshot.");
+    }
     if (tab.discarded) tab = await bounded(() => reloadDiscarded(tabId));
     const viewportOnly = !options.clip && !options.fullPage;
     if (tab.active && viewportOnly) return await bounded(() => captureVisible(tab, timers, deadline, false));
@@ -185,6 +192,18 @@ async function capture(tabId, options, deadline) {
     const viewport = metrics.cssVisualViewport;
     if (!viewport || !Number.isFinite(viewport.clientWidth) || !Number.isFinite(viewport.clientHeight)) {
       throw new Error('Chrome did not report the screenshot viewport.');
+    }
+    // A tab reloaded in the background (a discarded one) has no size until it is drawn:
+    // Page.getLayoutMetrics reports a 0x0 viewport, and the default clip used to fail as
+    // "clip must be a positive rectangle". A viewport capture takes 0.8.1's path instead,
+    // which draws and sizes the tab; a clip or full page has nothing to measure yet.
+    if (viewport.clientWidth < 1 || viewport.clientHeight < 1) {
+      if (!viewportOnly) {
+        throw new Error('The tab has not been drawn since it reloaded in the background, so it has no size yet. Take a plain screenshot first, then the clip or full page.');
+      }
+      await chrome.debugger.detach(target).catch(() => {});
+      attached = false;
+      return await bounded(() => captureVisible(tab, timers, deadline, true));
     }
     if (options.fullPage && options.clip) throw new Error('Choose fullPage or clip, not both.');
     const clip = options.clip ?? { x: 0, y: 0, width: viewport.clientWidth, height: viewport.clientHeight };
