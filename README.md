@@ -31,6 +31,10 @@ The 0.10.0 redesign brings readable 16px conversation text, a rounded message ba
 editable starting prompts, and a simpler settings page. Follow-up questions keep
 the recent conversation in context.
 
+This release also includes the screenshot fixes from 0.9.1. Minimized windows
+return a clear error immediately, and a plain screenshot can recover when a
+background tab has not been drawn yet.
+
 ## Keep the conversation beside the page
 
 Ask for the useful details, then ask the next question. The **Current page**

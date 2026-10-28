@@ -21,6 +21,14 @@ Desktop 0.9.3 returns these panel answers on completion. The panel truthfully sh
 waiting feedback while the real request runs; this gallery makes no speed or
 streaming claim. The gallery does not advertise Stop as a side-panel capability.
 
+The final 0.10.0 release also includes v0.9.1 at commit
+`79fa68b997d2500e3f0145d787db77259b764729`. Its `src/page-capture.js` is
+byte-identical to that release, preserving both the minimized-window error and
+the zero-size viewport fallback. Eight screenshot regression tests cover those
+cases, tab restoration after a failed fallback, and both normal capture paths.
+The six checks for the repaired behavior fail against the actual v0.9.0 source;
+both unchanged-path controls pass. All eight pass against the integrated source.
+
 ## Visual acceptance
 
 - All upload images use actual native product pixels and real responses.
@@ -45,7 +53,7 @@ node scripts/build.mjs
 ```
 
 The source audit passed for 11 source files, seven permissions, and ten Chrome
-namespaces. All 15 node tests passed with zero failures. The release build uses
+namespaces. All 23 node tests passed with zero failures. The release build uses
 its existing deterministic allowlist and adds no runtime dependencies. No
 production data directory was used by the automated checks.
 
@@ -56,13 +64,15 @@ reports version 0.10.0, and all 27 packaged files match the release source bytes
 | Artifact | Final result |
 | --- | --- |
 | Package | `foxl-browser-extension-0.10.0.zip` |
-| Size | 225,409 bytes |
+| Size | 226,737 bytes |
 | Entries | 27 files |
-| SHA-256 | `481d521c29e45fa60a01e6e078327e43d588e60bf9547cde7e111bc20bbdff8f` |
+| SHA-256 | `04b8a3f1237f300b0e95e68b7a333196e5ee81dd79cd9b5836f2282345065621` |
 | Reproducibility | Two builds and both ZIP filenames have the same digest. |
-| Gallery provenance | All 21 source hashes in the render manifest match the release source. |
+| Gallery provenance | 20 of the 21 capture-source hashes match. The only later change is the nonvisual v0.9.1 capture backend; all five raw capture hashes and all visible UI source files are unchanged. |
 | README captures | Both RGB images exactly match their recorded native-capture crop pixels. |
 
 Local release artifacts include `SHA256SUMS.txt`, `RELEASE-NOTES.md`, and
 `VALIDATION.json`. Chrome Web Store submission status is recorded separately
 from the local Git release; preparing the package does not imply store approval.
+The original capture provenance is preserved, with the later backend change
+documented in `store/review/release-capture-compatibility.json`.

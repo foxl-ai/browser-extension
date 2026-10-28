@@ -8,8 +8,6 @@ version pinned to the app's unified line; the split makes the two independent.
 
 ## v0.10.0 - October 27, 2026
 
-The Chrome Web Store goes from 0.9.0 to this version: it also carries the v0.9.1 fixes below, which were not published to the store on their own.
-
 ### Changed
 
 - Redesigned the side panel and settings with Foxl's Geist typography, neutral
@@ -33,6 +31,11 @@ The Chrome Web Store goes from 0.9.0 to this version: it also carries the v0.9.1
 - Saved connection changes reconnect the worker to the new address, and the
   connection check reports the worker's actual connection.
 - A completed side-panel request clears the activity indicator on its page.
+
+### Included from v0.9.1
+
+- Preserves the minimized-window screenshot error and the zero-size viewport
+  fallback released in v0.9.1.
 
 ## v0.9.1 - October 27, 2026
 
