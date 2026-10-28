@@ -6,7 +6,7 @@ This extension has its own version line, independent of the Foxl Desktop release
 number. It used to ship inside the Foxl monorepo, where a script kept its manifest
 version pinned to the app's unified line; the split makes the two independent.
 
-## v0.9.1 (unreleased)
+## v0.9.1 - October 27, 2026
 
 ### Fixed
 
