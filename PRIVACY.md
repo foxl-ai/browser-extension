@@ -31,6 +31,7 @@ about them is more useful than a reassuring summary:
 | Tab URLs and titles | So a task can move between sites and the agent knows where it is | The configured Foxl server |
 | Your side-panel messages and recent replies | To answer your request and follow-up questions | The configured Foxl server |
 | Actions the agent performs: clicks, typed text, navigation | They are the work itself | Performed in your browser |
+| After a click or key press that sent a form or loaded a page: the page's title, first heading and first 300 characters of text, and the form's address, its button's words and up to eight of its answers (the choices: boxes ticked, options, amounts, dates; never a hidden field, and never a form with a password field) | So Foxl knows what the step did before it reads the page, and does not send the same form twice by mistake | The configured Foxl server |
 | Your settings: the server URL and appearance preference | So you do not re-enter them | `chrome.storage.local`, on your machine only |
 
 Page content can include whatever is on the page, and that may be personal:
@@ -77,7 +78,7 @@ it, and so the two cannot drift apart quietly.
 | Personal communications | No | Not extracted or singled out, for the same reason as personally identifiable information above. |
 | Location | No | Not collected. No geolocation API is used. |
 | Web history | No browsing-history collection | The extension reads the target tab's URL and title. Snapshot baselines temporarily hold the URL in memory; they are not a history database. Only if you allow download receipts on the options page (the optional `downloads` permission): a download that a tab Foxl is working in starts is reported to the configured Foxl server with its file name (never its folder), size, state and source address without its query, read from Chrome's own download list when Foxl asks. Your other downloads are never read. |
-| User activity | No | Your clicks, keystrokes and mouse movement are not recorded. The clicks and typing that do happen are the agent carrying out the instruction you gave it. |
+| User activity | No | Your clicks, keystrokes and mouse movement are not recorded. The clicks and typing that do happen are the agent carrying out the instruction you gave it. A form you send yourself is never recorded or stopped: only a form sent during one of the agent's own clicks or key presses is described to the configured Foxl server. |
 
 The three certifications the store requires, each true of this code:
 

@@ -48,6 +48,34 @@ beside `version`; a desktop gates the new actions on these names. Every earlier 
 | `get_tabs` | As before | Each tab adds `openerTabId` (the tab that opened it, or null) |
 | `switch_tab` | As before | Unchanged: it moves where commands without a `tabId` go (`focusedTabId`) and never selects the tab in Chrome's window |
 
+## What a click or a key press did (0.12)
+
+`capabilities` adds `"step-watch"`. A desktop sends `hold` and reads `step` only when it is announced; an older build ignores `hold` and never sends `step`.
+
+| Action | Parameters | Result |
+| :--- | :--- | :--- |
+| `click`, `click_at`, `press_key`, and `type` with `submit: true` | As before, plus optional `hold: ["<digest>", ...]`: the forms the desktop's chat already sent (at most 50 are read) | As before. When the step started something, the answer waits for it and adds `step: { settled, navigated, submitted, blocked, waitedMs, page }`. When nothing happened there is no wait and no `step`. |
+
+"Started something" means a form was sent (any `submit` event), a page load began, a request the page started after the step is still running, or the page changed. The answer waits until the load commits, or until those requests end and the page has not changed for 300 ms (at most 1.5 s more), and never longer than 8 s.
+
+- `settled`: `"answered"`; `"still_loading"` (still going at 8 s: read the page again, do not repeat the step); or `"blocked"` (a held form, below).
+- `navigated`: a page load happened.
+- `page`: `{ title, heading, text }` of the page after the step: the title (120 characters), the first `h1` (160) and the start of the page's text (300).
+- `submitted` and `blocked`: `{ digest, host, action, label, summary }` for a POST form with no password field:
+  - `action` is the form's path and `label` the submit control's own words;
+  - `summary` holds up to eight `name: value` lines of the form's identity, each value cut at 60 characters, with runs of 12 or more digits shown as `...`.
+
+**A form's identity** is its action and the person's choices in it: boxes ticked, options chosen, and amounts, dates and counts typed. When the form holds only words, every answer counts. Hidden fields never count. The digest is FNV-1a over that identity, computed by the same source as the desktop's own browser (foxl-ai/pilot `server/tools/browser-step-watch.ts` `DESCRIBE_FORM_SOURCE`, copied verbatim into `step-watch.js`), so a chat that uses both browsers matches. Change both together.
+
+**The hold** stops a submit whose digest is in `hold` before the page's own handlers run, and reports it as `blocked`. Only a submit during the step is looked at: within 10 s of its start, and before it is read. So a form the person sends is never described and never stopped.
+
+**What waits, and what does not**:
+- A single-page app's own navigation (`history.pushState`, or a link the app intercepts with the Navigation API) does not unload the page. Its view change is waited for as a change to the page, not as a page load.
+- A POST answered with 204 or with a download starts a load that never commits, and the page is never told. It waits the full 8 s and reads `still_loading`.
+- When a load commits, the page that was asked is gone: the service worker waits for the tab to finish loading, then reads the new page (`STEP_PAGE`). The new page carries the sent form's identity in `sessionStorage` when it is on the same origin.
+
+The page's requests are counted by `request-watch.js`, in the page's own world (`"world": "MAIN"`), because the content scripts' isolated world cannot see the page's `fetch` or `XMLHttpRequest`. It passes every call through unchanged. It tells `step-watch.js` when a request starts and ends with a `foxl-request` event (`+<id>` / `-<id>`). A page can dispatch the same event itself, and the worst that does is make a step wait longer, up to the bound. A tab whose page cannot be armed (one loaded before the extension updated, a page without content scripts) runs the step as 0.11 did, with no `step`.
+
 Capture supports HTTP(S) pages, and file pages with "Allow access to file URLs" on. The selected
 tab of a window is captured with `tabs.captureVisibleTab`; only a background tab is attached to.
 It checks the site-access grant using `scripting.executeScript`, hides its own overlay, and

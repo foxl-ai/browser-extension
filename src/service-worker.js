@@ -128,8 +128,10 @@ let focusedTabId = null; // The tab currently focused for agent operations
  * build before 0.11.0 sends `{ version }` only). #6245: tree lines mark what they cut and what is
  * not shown (`read-marks`), one element's whole text is read by ref (`read-text`), a Foxl task
  * tab's downloads are reported (`downloads`), and tabs carry their opener (`tab-openers`).
+ * 0.12.0 (foxl-ai/pilot #6394): a click or a key press waits for what it started and reports it,
+ * and holds back a form the desktop's chat already sent (`step-watch`, step-watch.js).
  */
-const CAPABILITIES = ['read-marks', 'read-text', 'downloads', 'tab-openers'];
+const CAPABILITIES = ['read-marks', 'read-text', 'downloads', 'tab-openers', 'step-watch'];
 
 /*
  * WHERE FOXL LAST ACTED: the last time Foxl clicked, typed, pressed a key, chose an option or
@@ -502,8 +504,16 @@ async function executeBrowserCommand(command) {
   const targetTabId = await resolveTargetTab(tabId);
   // A navigation to a file downloads from the site it names, so it is remembered with that one.
   if (targetTabId && (INPUT_ACTIONS.has(action) || action === 'navigate')) await noteActed(targetTabId, action === 'navigate' ? params?.url : null);
-  
+
   try {
+    // 0.12.0 (foxl-ai/pilot #6394): a click or a key press is watched until what it started has answered.
+    const watched = targetTabId && stepWatched(action, params) ? await armStep(targetTabId, params?.hold) : null;
+    if (watched) {
+      const result = await runWatchedStep(action, targetTabId, params, deadline);
+      const step = result && result.success !== false ? await settleStep(targetTabId, watched) : null;
+      // Nothing happened: the answer is what it always was.
+      return step && step.settled !== 'nothing' ? { ...result, step } : result;
+    }
     switch (action) {
       case 'get_accessibility_tree':
         if (params?.snapshot) return withDownloads(await getPageSnapshot(targetTabId, params), targetTabId);
@@ -1034,7 +1044,7 @@ async function navigateTab(tabId, url) {
  * extension answers before the desktop's 30 s timeout ever fires.
  */
 const LOAD_WAIT_MS = 25000;
-function waitForTabLoad(tabId, { alreadyStarted = false } = {}) {
+function waitForTabLoad(tabId, { alreadyStarted = false, waitMs = LOAD_WAIT_MS } = {}) {
   return new Promise((resolve) => {
     let done = false;
     const finish = () => {
@@ -1048,13 +1058,75 @@ function waitForTabLoad(tabId, { alreadyStarted = false } = {}) {
       if (updatedTabId === tabId && changeInfo.status === 'complete') finish();
     };
     chrome.tabs.onUpdated.addListener(listener);
-    const timer = setTimeout(finish, LOAD_WAIT_MS);
+    const timer = setTimeout(finish, waitMs);
     if (alreadyStarted) {
       chrome.tabs.get(tabId).then((tab) => {
         if (tab.status === 'complete' && tab.url && tab.url !== 'about:blank') finish();
       }).catch(finish);
     }
   });
+}
+
+/*
+ * WHAT A CLICK OR A KEY PRESS DID (0.12.0, foxl-ai/pilot #6394; the page side is step-watch.js). A
+ * click returns as soon as the content script has clicked, before a form's navigation starts, so a
+ * read sent with it saw the form again and one bill dispute was filed twice. The step is armed first,
+ * and after it the page says what happened, waiting only when something did. When the step's
+ * navigation commits, the page that was asked is gone (its message channel closes): the tab's load is
+ * waited for and the new page is read. `params.hold` lists the forms the desktop's chat already sent;
+ * a submit of one of them is stopped during the step and reported as `blocked`.
+ */
+const STEP_SETTLE_MS = 8000;
+
+/** The steps that can send a form or start a navigation: a click, a key press, and typing that presses Enter. */
+function stepWatched(action, params) {
+  return action === 'click' || action === 'click_at' || action === 'press_key' || (action === 'type' && params?.submit === true);
+}
+
+function runWatchedStep(action, tabId, params, deadline) {
+  switch (action) {
+    case 'click': return clickElement(tabId, params.refId, deadline);
+    case 'click_at': return clickAt(tabId, params?.x, params?.y, deadline);
+    case 'press_key': return pressKey(tabId, params?.key, params?.refId, deadline);
+    case 'type': return typeInElement(tabId, params.refId, params.text, params.submit, deadline);
+    default: return Promise.resolve({ success: false, error: `Unknown action: ${action}` });
+  }
+}
+
+/** Arms the tab's page (its top frame), or null when it cannot be armed: the step then runs as before. */
+async function armStep(tabId, hold) {
+  try {
+    const r = await chrome.tabs.sendMessage(tabId, { type: 'STEP_ARM', hold: Array.isArray(hold) ? hold : [] }, { frameId: 0 });
+    return r && r.success && typeof r.origin === 'number' ? { origin: r.origin } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** What the step did, or null when the page could not say (the step's own answer then stands). */
+async function settleStep(tabId, armed) {
+  const started = Date.now();
+  try {
+    const r = await chrome.tabs.sendMessage(tabId, { type: 'STEP_SETTLE', origin: armed.origin }, { frameId: 0 });
+    if (r && r.success && r.settled) {
+      return { settled: r.settled, navigated: !!r.navigated, submitted: r.submitted || null, blocked: r.blocked || null, waitedMs: Date.now() - started, page: r.page || null };
+    }
+  } catch {
+    // The page that was asked is gone: the step's navigation committed. Read the page it led to.
+  }
+  await waitForTabLoad(tabId, { alreadyStarted: true, waitMs: STEP_SETTLE_MS });
+  for (let i = 0; i < 10; i++) {
+    try {
+      const p = await chrome.tabs.sendMessage(tabId, { type: 'STEP_PAGE', origin: armed.origin }, { frameId: 0 });
+      if (p && p.success) {
+        return { settled: 'answered', navigated: true, submitted: p.submitted || null, blocked: null, waitedMs: Date.now() - started, page: p.page || null };
+      }
+    } catch {
+      // The new page's scripts are not there yet.
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return null;
 }
 
 /**
