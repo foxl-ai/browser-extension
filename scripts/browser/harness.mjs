@@ -99,20 +99,41 @@ export async function launchExtension({ routes = {}, grant = [] } = {}) {
   const port = server.address().port;
   const origin = `http://localhost:${port}`;
 
-  const extDir = extensionCopy(port, grant);
-  const profile = mkdtempSync(join(tmpdir(), 'foxl-extension-profile-'));
-  const context = await chromium.launchPersistentContext(profile, {
-    channel: 'chromium',
-    headless: true,
-    // Playwright turns Chrome's pop-up blocker off by default; a blocked pop-up is under test here.
-    ignoreDefaultArgs: ['--disable-popup-blocking'],
-    args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
-    acceptDownloads: true,
-  });
-  const announced = await Promise.race([
-    helloSeen,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('the extension never connected to the test desktop')), 20_000)),
-  ]);
+  /*
+   * A launch that fails after the server is listening closes it again: a listening loopback server
+   * keeps node alive after the last test, and the run then never ends (measured: a red run against
+   * 0.10.0, whose manifest has no optional `downloads` to grant, hung for 25 minutes).
+   */
+  let extDir = null;
+  let profile = null;
+  let context = null;
+  let announced;
+  let helloTimer;
+  try {
+    extDir = extensionCopy(port, grant);
+    profile = mkdtempSync(join(tmpdir(), 'foxl-extension-profile-'));
+    context = await chromium.launchPersistentContext(profile, {
+      channel: 'chromium',
+      headless: true,
+      // Playwright turns Chrome's pop-up blocker off by default; a blocked pop-up is under test here.
+      ignoreDefaultArgs: ['--disable-popup-blocking'],
+      args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
+      acceptDownloads: true,
+    });
+    announced = await Promise.race([
+      helloSeen,
+      new Promise((_, reject) => { helloTimer = setTimeout(() => reject(new Error('the extension never connected to the test desktop')), 20_000); }),
+    ]);
+  } catch (err) {
+    await context?.close().catch(() => {});
+    sockets.close();
+    await new Promise((r) => server.close(r));
+    if (extDir) rmSync(extDir, { recursive: true, force: true });
+    if (profile) rmSync(profile, { recursive: true, force: true });
+    throw err;
+  } finally {
+    clearTimeout(helloTimer);
+  }
 
   /** One command, as the desktop sends it; resolves to the extension's `browser_result` data. */
   const command = (action, tabId, params = {}) => new Promise((resolveResult, reject) => {

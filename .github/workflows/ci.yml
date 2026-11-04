@@ -69,6 +69,8 @@ jobs:
   # The only job here that installs anything: Playwright and ws, the test's own devDependencies.
   browser:
     runs-on: ubuntu-latest
+    # A browser run that hangs (a handle left open) ends here, not at GitHub's six hours.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
