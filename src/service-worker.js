@@ -123,6 +123,21 @@ let discoveredServerUrl = null; // Cached auto-discovered URL
 let tabContexts = new Map();
 let focusedTabId = null; // The tab currently focused for agent operations
 
+/*
+ * WHAT THIS BUILD CAN DO BEYOND ITS VERSION, announced in `extension_connected` (additive: every
+ * build before 0.11.0 sends `{ version }` only). #6245: tree lines mark what they cut and what is
+ * not shown (`read-marks`), one element's whole text is read by ref (`read-text`), a Foxl task
+ * tab's downloads are reported (`downloads`), and tabs carry their opener (`tab-openers`).
+ */
+const CAPABILITIES = ['read-marks', 'read-text', 'downloads', 'tab-openers'];
+
+/*
+ * WHERE FOXL LAST ACTED: the last time Foxl clicked, typed, pressed a key, chose an option or
+ * navigated in each tab, the steps that can start a download. A download is Foxl's to report only
+ * when such a tab, acted in within DOWNLOAD_MATCH_MS, is on the download's origin (#6245).
+ */
+const actedTabs = new Map(); // tabId -> { at: ms, origin }
+
 // Enable side panel to open on action click
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
   .catch((error) => console.error('[Foxl] Failed to set panel behavior:', error));
@@ -227,7 +242,7 @@ async function connectToServer() {
         getServerUrl().then(url => { discoveredServerUrl = url; });
         serverSocket.send(JSON.stringify({
           type: 'extension_connected',
-          data: { version: chrome.runtime.getManifest().version }
+          data: { version: chrome.runtime.getManifest().version, capabilities: CAPABILITIES }
         }));
         
         // Start keep-alive ping to prevent service worker from sleeping
@@ -485,12 +500,22 @@ const inputQueue = createInputQueue();
 async function executeBrowserCommand(command) {
   const { action, tabId, params, deadline } = command;
   const targetTabId = await resolveTargetTab(tabId);
+  // A navigation to a file downloads from the site it names, so it is remembered with that one.
+  if (targetTabId && (INPUT_ACTIONS.has(action) || action === 'navigate')) await noteActed(targetTabId, action === 'navigate' ? params?.url : null);
   
   try {
     switch (action) {
       case 'get_accessibility_tree':
-        if (params?.snapshot) return await getPageSnapshot(targetTabId, params);
-        return await getAccessibilityTree(targetTabId, params);
+        if (params?.snapshot) return withDownloads(await getPageSnapshot(targetTabId, params), targetTabId);
+        return withDownloads(await getAccessibilityTree(targetTabId, params), targetTabId);
+
+      // Added in 0.11.0 (#6245): one element's whole text, a slice at a time.
+      case 'read_text':
+        return await readElementText(targetTabId, params);
+
+      // Added in 0.11.0 (#6245): the downloads Foxl's task tabs started, with their state.
+      case 'get_downloads':
+        return await getDownloads(params);
         
       case 'click':
         return await clickElement(targetTabId, params.refId, deadline);
@@ -586,6 +611,176 @@ async function executeBrowserCommand(command) {
   } catch (err) {
     return { success: false, error: err.message };
   }
+}
+
+/*
+ * ONE ELEMENT'S WHOLE TEXT (#6245). A tree line shows 100 characters of an element's text and marks
+ * the rest (`clipped=100/5000`); this reads it by ref, from `offset`, at most 20,000 characters a
+ * call (the content script's `__pilotReadText`). Read-only, the top frame of the target tab. A tab
+ * opened before the extension updated still runs the old content script until it reloads, and
+ * says so.
+ */
+async function readElementText(tabId, params = {}) {
+  if (!tabId) return { success: false, error: 'No active tab' };
+  if (typeof params?.refId !== 'string' || !params.refId) return { success: false, error: 'params.refId required for read_text' };
+  const page = await readAllowedPage(tabId, ({ refId, offset, maxChars }) => {
+    if (typeof window.__pilotReadText !== 'function') {
+      return { url: location.href, success: false, error: 'This page was opened before Foxl\'s extension updated. Reload the page to read an element\'s whole text.' };
+    }
+    return { ...window.__pilotReadText(refId, offset, maxChars), url: location.href };
+  }, [{ refId: params.refId, offset: params.offset ?? 0, maxChars: params.maxChars ?? 4000 }]);
+  const { documentId: _documentId, ...result } = page;
+  return { ...result, tabId };
+}
+
+/*
+ * DOWNLOADS, AS A RECEIPT (#6245). A site's "your file is ready" screen is not a file: in the case
+ * behind #6245 Chrome's "download multiple files" prompt held the second and third files of one
+ * export, and the page said all three were done. So the downloads a Foxl task tab started come back
+ * with what Chrome's own download list says about them (file name, never the folder; state, bytes,
+ * error), from `get_downloads` and with the next read of that tab (`downloads`).
+ *
+ * `downloads` is an OPTIONAL permission: a required one makes Chrome turn the extension off for
+ * every person at update until they accept it. Until the person allows it on the options page,
+ * `get_downloads` answers `granted: false` (and the options page shows that Foxl asked), and
+ * everything else works as without it. The list is read when asked (`chrome.downloads.search`), so
+ * a grant takes effect at once and no listener has to be registered after it.
+ *
+ * A download is Foxl's when it started within two minutes after Foxl clicked, typed, pressed a key,
+ * chose an option or navigated in a tab on the download's site (its referrer's, else its own). The
+ * person's downloads anywhere else are never read. Chrome's download records name no tab, so one the
+ * person starts on that same site in that window is counted as Foxl's: the residual of reading
+ * downloads without a tab.
+ */
+const DOWNLOAD_KEEP = 20;
+const DOWNLOAD_MATCH_MS = 2 * 60_000;
+const DOWNLOAD_READ_WINDOW_MS = 10 * 60_000;
+const ACTED_KEY = 'foxlActedTabs';
+const DOWNLOADS_ASKED_KEY = 'downloadReceiptsAsked';
+let actedLoaded = null;
+
+function originOf(url) {
+  try {
+    const origin = new URL(url).origin;
+    return origin && origin !== 'null' ? origin : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Foxl's step in a tab, with that tab's site (or `url`'s), kept for the session so a restarted worker has it. */
+async function noteActed(tabId, url = null) {
+  let origin = url ? originOf(url) : null;
+  if (!origin) {
+    try { origin = originOf((await chrome.tabs.get(tabId)).url); } catch { /* the tab is gone */ }
+  }
+  if (!origin) return;
+  await loadActed();
+  actedTabs.set(tabId, { at: Date.now(), origin });
+  for (const [id, step] of actedTabs) if (Date.now() - step.at > DOWNLOAD_READ_WINDOW_MS) actedTabs.delete(id);
+  chrome.storage.session.set({ [ACTED_KEY]: [...actedTabs] }).catch(() => {});
+}
+
+function loadActed() {
+  actedLoaded ??= chrome.storage.session.get(ACTED_KEY).then((stored) => {
+    for (const [id, step] of stored?.[ACTED_KEY] ?? []) if (!actedTabs.has(id)) actedTabs.set(id, step);
+  }).catch(() => {});
+  return actedLoaded;
+}
+
+/** Where a download came from, without its query or fragment (a link can carry a token there). */
+function downloadSource(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol === 'http:' || u.protocol === 'https:') return `${u.origin}${u.pathname}`;
+    if (u.protocol === 'blob:') return `blob:${u.origin}`;
+    return `${u.protocol} URL`;
+  } catch {
+    return null;
+  }
+}
+
+/** The file's name: the last part of the path Chrome saves it to, never the folder. */
+function baseName(path) {
+  const name = String(path || '').split(/[\\/]/).pop();
+  return name || null;
+}
+
+const DANGER_SAFE = new Set(['safe', 'accepted']);
+
+/** The Foxl tab a download belongs to: the last step on its site before it started, within the window. */
+function taskTabOf(item) {
+  const from = originOf(item.referrer) || originOf(item.finalUrl || item.url);
+  const started = Date.parse(item.startTime) || 0;
+  if (!from || !started) return null;
+  let best = null;
+  for (const [tabId, step] of actedTabs) {
+    if (step.origin !== from) continue;
+    const after = started - step.at;
+    // A second of clock skew: Chrome stamps the download, this worker stamps the step.
+    if (after < -1000 || after > DOWNLOAD_MATCH_MS) continue;
+    if (!best || step.at > best.at) best = { tabId, at: step.at };
+  }
+  return best?.tabId ?? null;
+}
+
+function downloadRecord(item, tabId) {
+  return {
+    id: item.id,
+    tabId,
+    file: baseName(item.filename),
+    source: downloadSource(item.finalUrl || item.url),
+    mime: item.mime || null,
+    state: item.state || 'in_progress',
+    bytesReceived: Number(item.bytesReceived) || 0,
+    totalBytes: Number(item.totalBytes) > 0 ? Number(item.totalBytes) : null,
+    error: item.error || null,
+    danger: item.danger && !DANGER_SAFE.has(item.danger) ? item.danger : null,
+    startedAt: Date.parse(item.startTime) || null,
+    endedAt: item.endTime ? (Date.parse(item.endTime) || null) : null,
+  };
+}
+
+/** Chrome's list of the last ten minutes, Foxl's downloads only, oldest first; null without the permission. */
+async function taskDownloads() {
+  if (!chrome.downloads?.search) return null;
+  await loadActed();
+  const items = await chrome.downloads.search({
+    startedAfter: new Date(Date.now() - DOWNLOAD_READ_WINDOW_MS).toISOString(),
+    orderBy: ['-startTime'],
+    limit: 100,
+  });
+  const mine = [];
+  for (const item of items) {
+    const tabId = taskTabOf(item);
+    if (tabId) mine.push(downloadRecord(item, tabId));
+  }
+  return mine.slice(0, DOWNLOAD_KEEP).reverse();
+}
+
+async function getDownloads(params = {}) {
+  const list = await taskDownloads();
+  if (list === null) {
+    // The options page shows that Foxl asked, beside the switch that allows it.
+    chrome.storage.local.set({ [DOWNLOADS_ASKED_KEY]: Date.now() }).catch(() => {});
+    return {
+      success: false,
+      granted: false,
+      error: 'Download receipts are not allowed in this browser yet. The person can turn them on in the Foxl extension\'s options (Download receipts, Allow).',
+    };
+  }
+  const tabId = Number.isSafeInteger(params?.tabId) ? params.tabId : null;
+  const since = Number(params?.since) || 0;
+  return { success: true, granted: true, downloads: list.filter((d) => (tabId === null || d.tabId === tabId) && (d.startedAt ?? 0) >= since) };
+}
+
+/** A read of a tab, with the downloads that tab started in the last ten minutes when there are any. */
+async function withDownloads(result, tabId) {
+  if (!result || result.success === false || !tabId) return result;
+  let list = null;
+  try { list = await taskDownloads(); } catch { list = null; }
+  const mine = (list ?? []).filter((d) => d.tabId === tabId);
+  return mine.length ? { ...result, downloads: mine } : result;
 }
 
 /**
@@ -978,7 +1173,8 @@ async function getPilotTabs() {
         id: t.id,
         url: t.url,
         title: t.title,
-        active: t.active
+        active: t.active,
+        openerTabId: t.openerTabId ?? null
       }))
     };
   } catch (err) {
@@ -1046,7 +1242,9 @@ async function getTabs() {
         url: t.url,
         title: t.title,
         active: t.active,
-        windowId: t.windowId
+        windowId: t.windowId,
+        // #6245: the tab that opened this one (a pop-up, a target=_blank link), or null.
+        openerTabId: t.openerTabId ?? null
       }))
     };
   } catch (err) {

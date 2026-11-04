@@ -41,6 +41,20 @@ export async function getPageSnapshot(tabId, options = {}) {
     chars += line.length + 1;
   }
   const now = Date.now();
+  /*
+   * WHAT THE KEPT LINES CUT AND HIDE (#6245). `truncated` counts dropped LINES only; each line now
+   * marks its own cut text (`clipped=`, `clipped_value=`) and, under filter "all", what is not
+   * shown (`hidden`, `aria-hidden`), and these totals cover the lines this answer keeps. A page
+   * whose reader predates 0.11.0 (a tab opened before the update, until it reloads) reports no
+   * `readMarks`, and then none of these fields is claimed.
+   */
+  const keptRefs = new Set(lines.map((line) => /\[(ref_[^\]\s]+)\]/.exec(line)?.[1]).filter(Boolean));
+  const marks = page.readMarks ? {
+    readMarks: page.readMarks,
+    clippedElements: (Array.isArray(page.clippedElements) ? page.clippedElements : []).filter((c) => keptRefs.has(c.ref)),
+    hiddenElements: lines.filter((line) => /(?:^|\s)(?:aria-)?hidden(?=\s|$)/.test(line.replace(/"(?:[^"\\]|\\.)*"/g, '""'))).length,
+  } : {};
+  const blocked = Array.isArray(page.blockedPopups) && page.blockedPopups.length ? { blockedPopups: page.blockedPopups } : {};
   for (const [id, saved] of snapshots) if (now - saved.at > BASELINE_TTL_MS) snapshots.delete(id);
   const key = JSON.stringify({ tabId, documentId: page.documentId, url: page.url, filter, depth, maxChars, maxLines });
   const previous = options.since ? snapshots.get(options.since) : null;
@@ -69,6 +83,7 @@ export async function getPageSnapshot(tabId, options = {}) {
     url: page.url, title: page.title, viewport: page.viewport,
     pageContent: text, truncated: lines.length < allLines.length,
     returnedLines: lines.length, totalLines: allLines.length,
+    ...marks, ...blocked,
   };
 }
 

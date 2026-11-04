@@ -35,6 +35,19 @@ The matching `browser_result` carries the same ID and a `data.success` result.
 | `get_accessibility_tree` | `snapshot: true`; optional `since`, `filter`, `depth`, `maxChars`, `maxLines` | `snapshotId`, `mode: "full" / "diff"`, text, URL/title/viewport, explicit truncation |
 | `scroll` | Existing direction and amount (negative scrolls the other way) | Actual scroll position, without selecting the tab, and `rendered` once a background tab has been drawn |
 
+## What a read cuts, downloads and pop-ups (0.11)
+
+`extension_connected` carries `capabilities: ["read-marks", "read-text", "downloads", "tab-openers"]`
+beside `version`; a desktop gates the new actions on these names. Every earlier build sends `{ version }` only.
+
+| Action | Parameters | Result |
+| :--- | :--- | :--- |
+| `get_accessibility_tree` | As before | Each line shows at most 100 characters of an element's text and 200 of a field's value; a longer one ends on `…` and carries `clipped=100/<total>` or `clipped_value=200/<total>` (counted with whitespace collapsed). Under filter `all` a line not drawn carries `hidden`, one under `aria-hidden` carries `aria-hidden`. The answer adds `readMarks: 1`, `clippedElements: [{ ref, field: "name" / "value" / "option", chars, totalChars }]`, `hiddenElements`, `blockedPopups: [{ url, at }]` (window.open calls Chrome blocked, as the page reports them; the last 10) and, when the tab started any in the last ten minutes, `downloads`. A tab opened before the extension updated runs the old reader until it reloads, and its answer has no `readMarks`. |
+| `read_text` | `refId`, optional `offset` (default 0), `maxChars` (default 4000, at most 20000) | `text` (the element's text content exactly, or an input's value; never a password or hidden field's), `offset`, `returnedChars`, `totalChars`, `nextOffset` (null at the end), `hidden` (`"hidden"`, `"aria-hidden"` or null) |
+| `get_downloads` | Optional `tabId`, `since` (ms) | `granted: true` and `downloads: [{ id, tabId, file, source, mime, state, bytesReceived, totalBytes, error, danger, startedAt, endedAt }]` from Chrome's list of the last ten minutes, only those started within two minutes after Foxl acted in a tab on their site; the last 20. `downloads` is an optional permission, asked for on the options page: until the person allows it, `{ success: false, granted: false, error }` |
+| `get_tabs` | As before | Each tab adds `openerTabId` (the tab that opened it, or null) |
+| `switch_tab` | As before | Unchanged: it moves where commands without a `tabId` go (`focusedTabId`) and never selects the tab in Chrome's window |
+
 Capture supports HTTP(S) pages, and file pages with "Allow access to file URLs" on. The selected
 tab of a window is captured with `tabs.captureVisibleTab`; only a background tab is attached to.
 It checks the site-access grant using `scripting.executeScript`, hides its own overlay, and
