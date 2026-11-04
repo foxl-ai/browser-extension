@@ -13,10 +13,13 @@
  * The real extension in Chromium (scripts/browser/harness.mjs: an unpacked copy, Chrome's pop-up
  * blocker on), against a fictional local site, driven over the desktop's own `browser_command`
  * protocol. Run: npm run test:browser. FOXL_EXTENSION_DIR=<a release's tree> runs it against that
- * build instead (the red run).
+ * build instead (the red run). `downloads` is an optional permission: the shipped build answers
+ * "not granted" (3a), and a second launch granted at load checks the receipts (3b).
  */
 import assert from 'node:assert/strict';
-import { basename } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
 import { launchExtension } from './harness.mjs';
 
@@ -140,7 +143,34 @@ test('2. under filter "all" a hidden element is marked; "visible" leaves it out'
   assert.equal(lineOf(visible.data.pageContent, 'Your card was declined'), '', 'the control: "visible" does not list it');
 });
 
-test('3. a download the task tab starts comes back as a receipt; one from another tab does not', async () => {
+const ROUTES = () => ({
+  '/statements': (req, res) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(PAGE); },
+  '/files/statement.csv': (req, res) => {
+    res.writeHead(200, { 'content-type': 'text/csv', 'content-disposition': 'attachment; filename="statement-2026-10.csv"', 'content-length': Buffer.byteLength(CSV) });
+    res.end(CSV);
+  },
+});
+
+test('3a. downloads is optional: without the grant get_downloads says so, and the rest reads as before', async () => {
+  const manifest = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'manifest.json'), 'utf8'));
+  assert.ok((manifest.optional_permissions ?? []).includes('downloads') && !(manifest.permissions ?? []).includes('downloads'),
+    'the shipped manifest asks for downloads only when the person allows it');
+  const answer = await ext.command('get_downloads', null, { tabId });
+  assert.equal(answer.success, false, JSON.stringify(answer));
+  assert.equal(answer.granted, false);
+  assert.match(answer.error, /options/);
+  const read = await ext.command('get_accessibility_tree', tabId, { snapshot: true, filter: 'visible' });
+  assert.equal(read.success, true);
+  assert.equal(read.downloads, undefined, 'a read carries no downloads');
+});
+
+test('3b. granted: a download the task tab starts comes back as a receipt; one from another site does not', async (t) => {
+  const granted = await launchExtension({ routes: ROUTES(), grant: ['downloads'] });
+  t.after(() => granted.close());
+  const page = await granted.context.newPage();
+  await page.goto(`${granted.origin}/statements`);
+  const tabId = await granted.tabIdOf(page);
+  const ext = granted;
   const tree = await ext.command('get_accessibility_tree', tabId, { filter: 'interactive' });
   const link = refOf(lineOf(tree.data.pageContent, 'Download October statement'));
   // Playwright saves a download under a name of its own; the receipt must name the file Chrome wrote.

@@ -122,7 +122,7 @@ textbox "Search" [ref_4] placeholder="Search..."
 button "Sign in" [ref_5]
 ```
 
-A line shows at most 100 characters of an element's text (200 of a field's value). A longer one ends on `…` and says how much it shows, `clipped=100/5000`, and the agent can read that element's whole text by its ref, a slice at a time. Read with the `all` filter, which also lists what the page is not showing, an element that is not drawn carries `hidden` and one hidden from assistive technology `aria-hidden`, so a hidden error message is never taken for the page's state. A pop-up Chrome blocked is reported with the page, every tab names the tab that opened it, and a download that a Foxl task tab starts is reported with its file name, size and state, so a page's "your file is ready" is never the only receipt. `switch_tab` changes which tab the agent's commands go to; it never brings that tab to the front of your window.
+A line shows at most 100 characters of an element's text (200 of a field's value). A longer one ends on `…` and says how much it shows, `clipped=100/5000`, and the agent can read that element's whole text by its ref, a slice at a time. Read with the `all` filter, which also lists what the page is not showing, an element that is not drawn carries `hidden` and one hidden from assistive technology `aria-hidden`, so a hidden error message is never taken for the page's state. A pop-up Chrome blocked is reported with the page, every tab names the tab that opened it, and, once you allow download receipts on the options page, a download that a Foxl task tab starts is reported with its file name, size and state, so a page's "your file is ready" is never the only receipt. `switch_tab` changes which tab the agent's commands go to; it never brings that tab to the front of your window.
 
 Screenshots capture a background tab without selecting it, including a chosen rectangle or the full document. On a compatible desktop, snapshots can return just the changes since a previously read snapshot. A service worker handles the desktop connection, tab management, and command dispatch; content scripts carry out page actions and display activity indicators.
 
@@ -130,7 +130,7 @@ Screenshots capture a background tab without selecting it, including a chosen re
 
 **By default, extension traffic goes to Foxl on your computer.** It discovers `http://localhost:13847`, with `http://localhost:3847` as the fallback. The options page can override that server URL; a custom endpoint changes where extension data is sent.
 
-Page text, screenshots, tab URLs and titles, the file names, sizes and states of downloads a Foxl task tab started, and chat requests can pass to that configured server. Foxl Desktop may then send task context to your chosen model provider or connected service. Local transport between Chrome and Desktop does not mean every part of the task stays on your computer.
+Page text, screenshots, tab URLs and titles, the file names, sizes and states of downloads a Foxl task tab started (once you allow download receipts), and chat requests can pass to that configured server. Foxl Desktop may then send task context to your chosen model provider or connected service. Local transport between Chrome and Desktop does not mean every part of the task stays on your computer.
 
 The extension has no analytics endpoint, remote configuration, or remotely hosted
 executable code. Connection and appearance settings are stored in
@@ -167,14 +167,15 @@ The manifest requests access to all sites so the agent can work on the pages you
 | `sidePanel` | Show the conversation beside the current page. |
 | `storage` | Save connection and appearance settings locally. |
 | `alarms` | Maintain the service worker's connection lifecycle. |
-| `downloads` | See the downloads a Foxl task tab starts (file name, size, state) so Foxl can confirm a file was really saved. Your other downloads are never read. |
+| `downloads` (optional) | Only after you choose **Allow** under **Download receipts** on the options page: see the downloads a Foxl task tab starts (file name, size, state) so Foxl can confirm a file was really saved. Your other downloads are never read. |
 
-Version 0.11.0 adds the `downloads` permission, so when it arrives Chrome asks you to
-accept "Manage your downloads" and keeps Foxl turned off until you do: open Chrome's
-menu and choose "Foxl is disabled", or re-enable it in `chrome://extensions` and
-review the permission prompt. If you are upgrading from 0.8.x or earlier, the same
-prompt also names the `debugger` permission introduced in 0.9 ("Access the page
-debugger backend").
+Version 0.11.0 requests the same permissions as 0.9.0, and the update installs without a
+prompt. Its one new permission, `downloads`, is optional: Chrome asks for it ("Manage your
+downloads") only when you choose **Allow** under **Download receipts** on the options page,
+and **Turn off** there takes it back. If you are upgrading from 0.8.x or earlier, Chrome
+asks you to accept the `debugger` permission introduced in 0.9 ("Access the page debugger
+backend"). If Foxl is disabled after updating, open Chrome's menu and choose "Foxl is
+disabled", or re-enable it in `chrome://extensions` and review the permission prompt.
 
 While Foxl captures a background tab, or draws one after scrolling it, Chrome shows a bar at the top of every tab in every window: "Foxl" started debugging this browser, with a Cancel button. The bar shortens the page you are viewing and closes 5 seconds after the last capture. The tab you are looking at is captured without the debugger. The API has broad capabilities; this extension uses only `Page.getLayoutMetrics` and `Page.captureScreenshot`, checks site access with `scripting` before attaching and before returning pixels, and detaches after each capture. It exposes no arbitrary CDP command, cookie reader, or network recorder. Where Chrome refuses the debugger (an administrator's DevTools policy, a page containing another extension's frame) or cannot draw a background tab (a PDF), a screenshot selects the tab for a moment and switches back, as 0.8 did. Without site access, a screenshot fails.
 

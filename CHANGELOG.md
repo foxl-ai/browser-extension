@@ -19,10 +19,12 @@ version pinned to the app's unified line; the split makes the two independent.
 - Read with the `all` filter, an element that is not drawn carries `hidden` and one
   hidden from assistive technology `aria-hidden`, so a hidden error message is no
   longer read as the page's state.
-- Downloads a Foxl task tab starts are reported, with their file name, size and state
-  (`get_downloads`, and with the next read of that tab). This needs the new
-  `downloads` permission: Chrome asks you to accept "Manage your downloads" when the
-  update arrives and keeps Foxl off until you do. Your other downloads are never read.
+- Download receipts: once you choose **Allow** under **Download receipts** on the
+  options page, the downloads a Foxl task tab starts are reported with their file name,
+  size and state (`get_downloads`, and with the next read of that tab). The `downloads`
+  permission is optional, so the update installs without a prompt; until you allow it,
+  Foxl is told receipts are not allowed and everything else works as before. Your
+  other downloads are never read.
 - A pop-up Chrome blocked is reported with the page (`blockedPopups`), and every tab
   names the tab that opened it (`openerTabId`).
 - The build announces what it can do (`capabilities`) when it connects.

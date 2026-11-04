@@ -52,7 +52,9 @@
     "tabs",
     "tabGroups",
     "alarms",
-    "debugger",
+    "debugger"
+  ],
+  "optional_permissions": [
     "downloads"
   ],
   "host_permissions": [

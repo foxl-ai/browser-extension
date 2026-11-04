@@ -12,6 +12,11 @@
  * Foxl Desktop's (13847, 3847), so a test never reaches a real desktop running on the same machine
  * (the extension discovers a desktop by probing those ports). The rewrite must match exactly once,
  * or the harness refuses to start.
+ *
+ * `grant: ['downloads']` also moves that OPTIONAL permission into `permissions` in the copy, so it is
+ * granted at load: headless Chromium cannot answer the prompt chrome.permissions.request opens
+ * (measured: a click on the options page's Allow left it not granted). The shipped manifest keeps it
+ * optional, which scripts/audit.mjs reports and the suite's not-granted case runs against.
  */
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -25,7 +30,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SKIP = new Set(['node_modules', '.git', 'dist', 'store', 'docs', '.store-research']);
 
 /** A copy of the extension whose service worker looks for the desktop on `port` only. */
-function extensionCopy(port) {
+function extensionCopy(port, grant = []) {
   const source = process.env.FOXL_EXTENSION_DIR ? resolve(process.env.FOXL_EXTENSION_DIR) : ROOT;
   const dir = mkdtempSync(join(tmpdir(), 'foxl-extension-'));
   cpSync(source, dir, { recursive: true, filter: (from) => !SKIP.has(from.slice(source.length + 1).split(/[\\/]/)[0]) });
@@ -35,6 +40,16 @@ function extensionCopy(port) {
   const found = text.match(pattern)?.length ?? 0;
   if (found !== 1) throw new Error(`expected SERVER_PORTS = [13847, 3847] once in ${worker}, found ${found}: refusing to run against a real desktop's ports`);
   writeFileSync(worker, text.replace(pattern, `const SERVER_PORTS = [${port}];`));
+  if (grant.length) {
+    const path = join(dir, 'manifest.json');
+    const manifest = JSON.parse(readFileSync(path, 'utf8'));
+    for (const name of grant) {
+      if (!(manifest.optional_permissions ?? []).includes(name)) throw new Error(`"${name}" is not an optional permission of this build`);
+      manifest.optional_permissions = manifest.optional_permissions.filter((p) => p !== name);
+      manifest.permissions = [...(manifest.permissions ?? []), name];
+    }
+    writeFileSync(path, JSON.stringify(manifest, null, 2));
+  }
   return dir;
 }
 
@@ -42,7 +57,7 @@ function extensionCopy(port) {
  * Starts the site + the desktop socket, then Chromium with the extension. `routes` maps a path to
  * `(req, res)`. Resolves once the extension's worker has connected and announced itself.
  */
-export async function launchExtension({ routes = {} } = {}) {
+export async function launchExtension({ routes = {}, grant = [] } = {}) {
   let socket = null;
   let hello = null;
   let nextId = 1;
@@ -84,7 +99,7 @@ export async function launchExtension({ routes = {} } = {}) {
   const port = server.address().port;
   const origin = `http://localhost:${port}`;
 
-  const extDir = extensionCopy(port);
+  const extDir = extensionCopy(port, grant);
   const profile = mkdtempSync(join(tmpdir(), 'foxl-extension-profile-'));
   const context = await chromium.launchPersistentContext(profile, {
     channel: 'chromium',

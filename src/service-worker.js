@@ -136,7 +136,7 @@ const CAPABILITIES = ['read-marks', 'read-text', 'downloads', 'tab-openers'];
  * navigated in each tab, the steps that can start a download. A download is Foxl's to report only
  * when such a tab, acted in within DOWNLOAD_MATCH_MS, is on the download's origin (#6245).
  */
-const actedTabs = new Map(); // tabId -> ms
+const actedTabs = new Map(); // tabId -> { at: ms, origin }
 
 // Enable side panel to open on action click
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
@@ -500,7 +500,8 @@ const inputQueue = createInputQueue();
 async function executeBrowserCommand(command) {
   const { action, tabId, params, deadline } = command;
   const targetTabId = await resolveTargetTab(tabId);
-  if (targetTabId && (INPUT_ACTIONS.has(action) || action === 'navigate')) actedTabs.set(targetTabId, Date.now());
+  // A navigation to a file downloads from the site it names, so it is remembered with that one.
+  if (targetTabId && (INPUT_ACTIONS.has(action) || action === 'navigate')) await noteActed(targetTabId, action === 'navigate' ? params?.url : null);
   
   try {
     switch (action) {
@@ -635,33 +636,28 @@ async function readElementText(tabId, params = {}) {
 /*
  * DOWNLOADS, AS A RECEIPT (#6245). A site's "your file is ready" screen is not a file: in the case
  * behind #6245 Chrome's "download multiple files" prompt held the second and third files of one
- * export, and the page said all three were done. So every download a Foxl task tab starts is kept
- * here with what Chrome says about it (its file name, never the folder; state, bytes, error), and
- * comes back with the next read of that tab (`downloads`) and from `get_downloads`. A download is
- * Foxl's when a tab where Foxl clicked, typed or navigated in the last two minutes is on the
- * download's origin (its referrer's, else its own); the person's downloads anywhere else are never
- * read. Chrome's download records name no tab, so one the person starts on that same site in that
- * window is counted as Foxl's: the residual of reading downloads without a tab. Kept in memory and in
- * chrome.storage.session, so a restarted worker still has them; the last DOWNLOAD_KEEP.
+ * export, and the page said all three were done. So the downloads a Foxl task tab started come back
+ * with what Chrome's own download list says about them (file name, never the folder; state, bytes,
+ * error), from `get_downloads` and with the next read of that tab (`downloads`).
+ *
+ * `downloads` is an OPTIONAL permission: a required one makes Chrome turn the extension off for
+ * every person at update until they accept it. Until the person allows it on the options page,
+ * `get_downloads` answers `granted: false` (and the options page shows that Foxl asked), and
+ * everything else works as without it. The list is read when asked (`chrome.downloads.search`), so
+ * a grant takes effect at once and no listener has to be registered after it.
+ *
+ * A download is Foxl's when it started within two minutes after Foxl clicked, typed, pressed a key,
+ * chose an option or navigated in a tab on the download's site (its referrer's, else its own). The
+ * person's downloads anywhere else are never read. Chrome's download records name no tab, so one the
+ * person starts on that same site in that window is counted as Foxl's: the residual of reading
+ * downloads without a tab.
  */
 const DOWNLOAD_KEEP = 20;
 const DOWNLOAD_MATCH_MS = 2 * 60_000;
 const DOWNLOAD_READ_WINDOW_MS = 10 * 60_000;
-const DOWNLOADS_KEY = 'foxlTaskDownloads';
-const downloads = new Map(); // download id -> record
-let downloadsLoaded = null;
-
-function loadDownloads() {
-  downloadsLoaded ??= chrome.storage.session.get(DOWNLOADS_KEY).then((stored) => {
-    for (const record of stored?.[DOWNLOADS_KEY] ?? []) if (!downloads.has(record.id)) downloads.set(record.id, record);
-  }).catch(() => {});
-  return downloadsLoaded;
-}
-
-function saveDownloads() {
-  while (downloads.size > DOWNLOAD_KEEP) downloads.delete(downloads.keys().next().value);
-  chrome.storage.session.set({ [DOWNLOADS_KEY]: [...downloads.values()] }).catch(() => {});
-}
+const ACTED_KEY = 'foxlActedTabs';
+const DOWNLOADS_ASKED_KEY = 'downloadReceiptsAsked';
+let actedLoaded = null;
 
 function originOf(url) {
   try {
@@ -670,6 +666,26 @@ function originOf(url) {
   } catch {
     return null;
   }
+}
+
+/** Foxl's step in a tab, with that tab's site (or `url`'s), kept for the session so a restarted worker has it. */
+async function noteActed(tabId, url = null) {
+  let origin = url ? originOf(url) : null;
+  if (!origin) {
+    try { origin = originOf((await chrome.tabs.get(tabId)).url); } catch { /* the tab is gone */ }
+  }
+  if (!origin) return;
+  await loadActed();
+  actedTabs.set(tabId, { at: Date.now(), origin });
+  for (const [id, step] of actedTabs) if (Date.now() - step.at > DOWNLOAD_READ_WINDOW_MS) actedTabs.delete(id);
+  chrome.storage.session.set({ [ACTED_KEY]: [...actedTabs] }).catch(() => {});
+}
+
+function loadActed() {
+  actedLoaded ??= chrome.storage.session.get(ACTED_KEY).then((stored) => {
+    for (const [id, step] of stored?.[ACTED_KEY] ?? []) if (!actedTabs.has(id)) actedTabs.set(id, step);
+  }).catch(() => {});
+  return actedLoaded;
 }
 
 /** Where a download came from, without its query or fragment (a link can carry a token there). */
@@ -692,6 +708,22 @@ function baseName(path) {
 
 const DANGER_SAFE = new Set(['safe', 'accepted']);
 
+/** The Foxl tab a download belongs to: the last step on its site before it started, within the window. */
+function taskTabOf(item) {
+  const from = originOf(item.referrer) || originOf(item.finalUrl || item.url);
+  const started = Date.parse(item.startTime) || 0;
+  if (!from || !started) return null;
+  let best = null;
+  for (const [tabId, step] of actedTabs) {
+    if (step.origin !== from) continue;
+    const after = started - step.at;
+    // A second of clock skew: Chrome stamps the download, this worker stamps the step.
+    if (after < -1000 || after > DOWNLOAD_MATCH_MS) continue;
+    if (!best || step.at > best.at) best = { tabId, at: step.at };
+  }
+  return best?.tabId ?? null;
+}
+
 function downloadRecord(item, tabId) {
   return {
     id: item.id,
@@ -704,80 +736,50 @@ function downloadRecord(item, tabId) {
     totalBytes: Number(item.totalBytes) > 0 ? Number(item.totalBytes) : null,
     error: item.error || null,
     danger: item.danger && !DANGER_SAFE.has(item.danger) ? item.danger : null,
-    startedAt: Date.parse(item.startTime) || Date.now(),
+    startedAt: Date.parse(item.startTime) || null,
     endedAt: item.endTime ? (Date.parse(item.endTime) || null) : null,
   };
 }
 
-async function taskTabFor(item) {
-  const from = originOf(item.referrer) || originOf(item.finalUrl || item.url);
-  if (!from) return null;
-  const now = Date.now();
-  let best = null;
-  for (const [tabId, at] of actedTabs) {
-    if (now - at > DOWNLOAD_MATCH_MS) continue;
-    let tab;
-    try { tab = await chrome.tabs.get(tabId); } catch { continue; }
-    if (originOf(tab.url) !== from) continue;
-    if (!best || at > best.at) best = { tabId, at };
+/** Chrome's list of the last ten minutes, Foxl's downloads only, oldest first; null without the permission. */
+async function taskDownloads() {
+  if (!chrome.downloads?.search) return null;
+  await loadActed();
+  const items = await chrome.downloads.search({
+    startedAfter: new Date(Date.now() - DOWNLOAD_READ_WINDOW_MS).toISOString(),
+    orderBy: ['-startTime'],
+    limit: 100,
+  });
+  const mine = [];
+  for (const item of items) {
+    const tabId = taskTabOf(item);
+    if (tabId) mine.push(downloadRecord(item, tabId));
   }
-  return best?.tabId ?? null;
-}
-
-chrome.downloads.onCreated.addListener((item) => {
-  (async () => {
-    await loadDownloads();
-    const tabId = await taskTabFor(item);
-    if (!tabId) return;
-    downloads.set(item.id, downloadRecord(item, tabId));
-    saveDownloads();
-  })().catch(() => {});
-});
-
-chrome.downloads.onChanged.addListener((delta) => {
-  (async () => {
-    await loadDownloads();
-    const record = downloads.get(delta.id);
-    if (!record) return;
-    if (delta.filename?.current) record.file = baseName(delta.filename.current);
-    if (delta.state?.current) record.state = delta.state.current;
-    if (delta.error?.current) record.error = delta.error.current;
-    if (Number(delta.totalBytes?.current) > 0) record.totalBytes = Number(delta.totalBytes.current);
-    if (delta.danger?.current) record.danger = DANGER_SAFE.has(delta.danger.current) ? null : delta.danger.current;
-    if (delta.endTime?.current) record.endedAt = Date.parse(delta.endTime.current) || Date.now();
-    if (record.state !== 'in_progress') {
-      const [item] = await chrome.downloads.search({ id: delta.id });
-      if (item) Object.assign(record, downloadRecord(item, record.tabId));
-    }
-    saveDownloads();
-  })().catch(() => {});
-});
-
-/** Every kept download brought up to date (an in-progress one's bytes), newest last. */
-async function currentDownloads() {
-  await loadDownloads();
-  for (const record of downloads.values()) {
-    if (record.state !== 'in_progress') continue;
-    try {
-      const [item] = await chrome.downloads.search({ id: record.id });
-      if (item) Object.assign(record, downloadRecord(item, record.tabId));
-    } catch { /* gone from Chrome's list: keep what was last known */ }
-  }
-  return [...downloads.values()].sort((a, b) => a.startedAt - b.startedAt);
+  return mine.slice(0, DOWNLOAD_KEEP).reverse();
 }
 
 async function getDownloads(params = {}) {
+  const list = await taskDownloads();
+  if (list === null) {
+    // The options page shows that Foxl asked, beside the switch that allows it.
+    chrome.storage.local.set({ [DOWNLOADS_ASKED_KEY]: Date.now() }).catch(() => {});
+    return {
+      success: false,
+      granted: false,
+      error: 'Download receipts are not allowed in this browser yet. The person can turn them on in the Foxl extension\'s options (Download receipts, Allow).',
+    };
+  }
   const tabId = Number.isSafeInteger(params?.tabId) ? params.tabId : null;
   const since = Number(params?.since) || 0;
-  const list = (await currentDownloads()).filter((d) => (tabId === null || d.tabId === tabId) && d.startedAt >= since);
-  return { success: true, downloads: list };
+  return { success: true, granted: true, downloads: list.filter((d) => (tabId === null || d.tabId === tabId) && (d.startedAt ?? 0) >= since) };
 }
 
 /** A read of a tab, with the downloads that tab started in the last ten minutes when there are any. */
 async function withDownloads(result, tabId) {
   if (!result || result.success === false || !tabId) return result;
-  const since = Date.now() - DOWNLOAD_READ_WINDOW_MS;
-  const mine = (await currentDownloads()).filter((d) => d.tabId === tabId && d.startedAt >= since);
+  let list = null;
+  try { list = await taskDownloads(); } catch { list = null; }
+  const mine = (list ?? []).filter((d) => d.tabId === tabId);
   return mine.length ? { ...result, downloads: mine } : result;
 }
 

@@ -13,6 +13,35 @@ const versionEl = document.getElementById('version');
 // Set version
 versionEl.textContent = chrome.runtime.getManifest().version;
 
+/*
+ * DOWNLOAD RECEIPTS (#6245). `downloads` is an optional permission (a required one turns the
+ * extension off at update until the person accepts it), so it is asked for here, from the person's
+ * click: chrome.permissions.request needs a user gesture, so it is called in the handler itself,
+ * before any await. The service worker reads Chrome's download list when asked, so a grant takes
+ * effect at once; until then Foxl is told receipts are not allowed, and this row shows that it asked.
+ */
+const DOWNLOADS = { permissions: ['downloads'] };
+const downloadsDot = document.getElementById('downloadsDot');
+const downloadsText = document.getElementById('downloadsText');
+const downloadsButton = document.getElementById('downloadsButton');
+let downloadsGranted = false;
+
+async function showDownloads() {
+  downloadsGranted = await chrome.permissions.contains(DOWNLOADS).catch(() => false);
+  const { downloadReceiptsAsked } = await chrome.storage.local.get('downloadReceiptsAsked').catch(() => ({}));
+  downloadsDot.classList.toggle('connected', downloadsGranted);
+  downloadsText.textContent = downloadsGranted ? 'On' : downloadReceiptsAsked ? 'Off. Foxl asked to confirm a download.' : 'Off';
+  downloadsButton.textContent = downloadsGranted ? 'Turn off' : 'Allow';
+}
+
+downloadsButton.addEventListener('click', () => {
+  const change = downloadsGranted ? chrome.permissions.remove(DOWNLOADS) : chrome.permissions.request(DOWNLOADS);
+  change.catch(() => false).finally(showDownloads);
+});
+chrome.permissions.onAdded.addListener(showDownloads);
+chrome.permissions.onRemoved.addListener(showDownloads);
+showDownloads();
+
 // Populate shortcut list (reads the actual binding Chrome assigned, which may
 // differ from the manifest `suggested_key` if there was a conflict at install time)
 const COMMAND_LABELS = {

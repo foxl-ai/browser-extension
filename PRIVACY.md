@@ -76,7 +76,7 @@ it, and so the two cannot drift apart quietly.
 | Authentication information | No separate collection | Password and hidden field values are omitted from text snapshots. The code calls no cookie or token API. Sensitive information can still be present in website content or screenshots. |
 | Personal communications | No | Not extracted or singled out, for the same reason as personally identifiable information above. |
 | Location | No | Not collected. No geolocation API is used. |
-| Web history | No browsing-history collection | The extension reads the target tab's URL and title. Snapshot baselines temporarily hold the URL in memory; they are not a history database. A download that a tab Foxl is working in starts is reported to the configured Foxl server with its file name (never its folder), size, state and source address without its query; the last 20 are kept for this browser session only. Your other downloads are never read. |
+| Web history | No browsing-history collection | The extension reads the target tab's URL and title. Snapshot baselines temporarily hold the URL in memory; they are not a history database. Only if you allow download receipts on the options page (the optional `downloads` permission): a download that a tab Foxl is working in starts is reported to the configured Foxl server with its file name (never its folder), size, state and source address without its query, read from Chrome's own download list when Foxl asks. Your other downloads are never read. |
 | User activity | No | Your clicks, keystrokes and mouse movement are not recorded. The clicks and typing that do happen are the agent carrying out the instruction you gave it. |
 
 The three certifications the store requires, each true of this code:
