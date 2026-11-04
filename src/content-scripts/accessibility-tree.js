@@ -23,6 +23,25 @@
   // page cannot add to it (see there). The only test of "is this Foxl's UI".
   window.__foxlOwnNodes = window.__foxlOwnNodes || new WeakSet();
 
+  /*
+   * THE POP-UPS CHROME BLOCKED (#6245). A window.open that Chrome's pop-up blocker refuses returns
+   * null in the page and says so nowhere else: in the case behind #6245 a portal's account button
+   * opened a broker in a blocked pop-up, and the agent asked for a password the person did not
+   * need. popup-watch.js runs in the page's own world (where window.open is) and dispatches this
+   * event; the page itself could dispatch one too, so an entry is what the page reports, never a
+   * reason to go somewhere. The last 10, read with the tree (`blockedPopups`).
+   */
+  if (!window.__foxlBlockedPopups) {
+    window.__foxlBlockedPopups = [];
+    document.addEventListener('foxl-window-open-blocked', (event) => {
+      let entry = null;
+      try { entry = JSON.parse(typeof event.detail === 'string' ? event.detail : 'null'); } catch { entry = null; }
+      if (!entry || typeof entry.url !== 'string') return;
+      window.__foxlBlockedPopups.push({ url: entry.url.slice(0, 2048), at: Number(entry.at) || Date.now() });
+      if (window.__foxlBlockedPopups.length > 10) window.__foxlBlockedPopups.shift();
+    }, true);
+  }
+
   /**
    * The element a person types into on a rich-text editor: the OUTERMOST contenteditable.
    * Gmail's compose body, Slack's and Notion's message boxes are all one of these. The tree
@@ -163,7 +182,7 @@
     if (tagName.match(/^h[1-6]$/)) {
       const text = element.textContent;
       if (text?.trim()) {
-        return text.trim().substring(0, 100);
+        return text.trim();
       }
     }
 
@@ -178,8 +197,7 @@
       }
     }
     if (directText?.trim() && directText.trim().length >= 3) {
-      const trimmed = directText.trim();
-      return trimmed.length > 100 ? trimmed.substring(0, 100) + '...' : trimmed;
+      return directText.trim();
     }
 
     return '';
@@ -195,6 +213,41 @@
            style.opacity !== '0' &&
            element.offsetWidth > 0 &&
            element.offsetHeight > 0;
+  }
+
+  /*
+   * WHAT A LINE CUTS, IT SAYS (#6245). A tree line shows at most NAME_CHARS of an element's text
+   * and VALUE_CHARS of a field's value. Until 0.11.0 the rest was dropped with no mark (and the
+   * `...` getAccessibleName added to long text was cut off by the same substring), so a
+   * 5,000-character JSON answer read as complete. Now a cut line ends its text on an ellipsis and
+   * carries `clipped=<shown>/<total>` (`clipped_value=` for a value), counted with each run of
+   * whitespace as one space, and the answer lists them in `clippedElements`; read_text reads the
+   * whole text by ref.
+   */
+  const NAME_CHARS = 100;
+  const VALUE_CHARS = 200;
+
+  /** Whitespace collapsed, cut at `limit` (never inside a surrogate pair) with an ellipsis. */
+  function clipText(text, limit) {
+    const flat = String(text).replace(/\s+/g, ' ');
+    if (flat.length <= limit) return { shown: flat, total: flat.length, clipped: false };
+    let end = limit;
+    if (/[\uD800-\uDBFF]/.test(flat[end - 1])) end -= 1;
+    return { shown: flat.slice(0, end) + '\u2026', total: flat.length, clipped: true };
+  }
+
+  const quoted = (value) => String(value).replace(/"/g, '\\"');
+
+  /*
+   * NOT SHOWN, under filter "all" (#6245): that filter lists hidden elements too, and until 0.11.0
+   * marked nothing, so a hidden error template read like the page's state. `hidden` is an element
+   * not drawn (display, visibility, opacity, no size); `aria-hidden` is one drawn but hidden from
+   * assistive technology (itself or an ancestor).
+   */
+  function hiddenReason(element) {
+    if (!isVisible(element)) return 'hidden';
+    if (element.closest && element.closest('[aria-hidden="true"]')) return 'aria-hidden';
+    return null;
   }
 
   /**
@@ -298,25 +351,35 @@
 
       // Build line
       let line = ' '.repeat(depth) + role;
+      const marks = [];
       if (name) {
-        const escapedName = name.replace(/\s+/g, ' ').substring(0, 100).replace(/"/g, '\\"');
-        line += ` "${escapedName}"`;
+        const shown = clipText(name, NAME_CHARS);
+        line += ` "${quoted(shown.shown)}"`;
+        if (shown.clipped) {
+          marks.push(`clipped=${NAME_CHARS}/${shown.total}`);
+          options.clipped.push({ ref: refId, field: 'name', chars: NAME_CHARS, totalChars: shown.total });
+        }
       }
       line += ` [${refId}]`;
 
       // Add relevant attributes
       if (element.getAttribute('href')) {
-        line += ` href="${element.getAttribute('href')}"`;
+        line += ` href="${quoted(element.getAttribute('href'))}"`;
       }
       if (element.getAttribute('type')) {
-        line += ` type="${element.getAttribute('type')}"`;
+        line += ` type="${quoted(element.getAttribute('type'))}"`;
       }
       if (element.getAttribute('placeholder')) {
-        line += ` placeholder="${element.getAttribute('placeholder')}"`;
+        line += ` placeholder="${quoted(element.getAttribute('placeholder'))}"`;
       }
       if ((element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
         && !['password', 'hidden', 'checkbox', 'radio', 'file', 'submit', 'button'].includes(element.type)) {
-        line += ` value="${element.value.replace(/\s+/g, ' ').slice(0, 200).replace(/"/g, '\\"')}"`;
+        const value = clipText(element.value, VALUE_CHARS);
+        line += ` value="${quoted(value.shown)}"`;
+        if (value.clipped) {
+          marks.push(`clipped_value=${VALUE_CHARS}/${value.total}`);
+          options.clipped.push({ ref: refId, field: 'value', chars: VALUE_CHARS, totalChars: value.total });
+        }
       }
       if (element instanceof HTMLInputElement && ['checkbox', 'radio'].includes(element.type)) {
         line += ` checked=${element.checked}`;
@@ -326,6 +389,14 @@
         const value = element.getAttribute(`aria-${state}`);
         if (value !== null) line += ` ${state}=${JSON.stringify(value)}`;
       }
+      if (options.filter === 'all') {
+        const hidden = hiddenReason(element);
+        if (hidden) {
+          marks.push(hidden);
+          options.hidden += 1;
+        }
+      }
+      if (marks.length) line += ` ${marks.join(' ')}`;
 
       output.push(line);
 
@@ -334,15 +405,19 @@
         for (const option of element.options) {
           let optLine = ' '.repeat(depth + 1) + 'option';
           const optText = option.textContent?.trim() || '';
-          if (optText) {
-            const escapedText = optText.replace(/\s+/g, ' ').substring(0, 100).replace(/"/g, '\\"');
-            optLine += ` "${escapedText}"`;
+          const optShown = optText ? clipText(optText, NAME_CHARS) : null;
+          if (optShown) {
+            optLine += ` "${quoted(optShown.shown)}"`;
           }
           if (option.selected) {
             optLine += ' (selected)';
           }
           if (option.value && option.value !== optText) {
             optLine += ` value="${option.value.replace(/"/g, '\\"')}"`;
+          }
+          if (optShown?.clipped) {
+            optLine += ` clipped=${NAME_CHARS}/${optShown.total}`;
+            options.clipped.push({ ref: refId, field: 'option', option: option.index, chars: NAME_CHARS, totalChars: optShown.total });
           }
           output.push(optLine);
         }
@@ -378,7 +453,9 @@
       const maxDepth = depth ?? 15;
       const options = {
         filter: filter || 'all',
-        refId: refId
+        refId: refId,
+        clipped: [],
+        hidden: 0,
       };
 
       // If targeting specific ref
@@ -432,11 +509,49 @@
 
       return {
         pageContent,
-        viewport: { width: window.innerWidth, height: window.innerHeight }
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        // #6245: 1 = every line marks what it cuts (`clipped=`, `clipped_value=`) and, under
+        // filter "all", what is not shown (`hidden`, `aria-hidden`). Absent from 0.10.0 and older.
+        readMarks: 1,
+        clippedElements: options.clipped,
+        hiddenElements: options.hidden,
+        blockedPopups: window.__foxlBlockedPopups.slice(),
       };
     } catch (err) {
       throw new Error('Error generating accessibility tree: ' + (err.message || 'Unknown error'));
     }
+  };
+
+  /*
+   * ONE ELEMENT'S WHOLE TEXT, A SLICE AT A TIME (#6245), so a long text the tree line cut (a
+   * page's JSON answer, a statement table) is read by ref instead of by screenshots. Read-only,
+   * this frame's element, at most READ_TEXT_MAX characters a call from `offset`; a field's value
+   * for an input or textarea (never a password or hidden field's), the text content otherwise,
+   * exactly as the page holds it (whitespace kept). `hidden` says when the element is not shown.
+   */
+  const READ_TEXT_MAX = 20000;
+  window.__pilotReadText = function(refId, offset = 0, maxChars = 4000) {
+    const element = window.__pilotGetElement(refId);
+    if (!element || isFoxlUi(element)) return notFound(refId);
+    const field = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement;
+    if (field && ['password', 'hidden'].includes(element.type)) {
+      return { success: false, error: `${refId} is a ${element.type} field: its value is not read.` };
+    }
+    const full = field ? element.value : (element.textContent || '');
+    const start = Math.min(full.length, Math.max(0, Math.floor(Number(offset) || 0)));
+    const size = Math.min(READ_TEXT_MAX, Math.max(1, Math.floor(Number(maxChars) || 4000)));
+    let end = Math.min(full.length, start + size);
+    if (end < full.length && end > start && /[\uD800-\uDBFF]/.test(full[end - 1])) end -= 1;
+    return {
+      success: true,
+      refId,
+      text: full.slice(start, end),
+      offset: start,
+      returnedChars: end - start,
+      totalChars: full.length,
+      nextOffset: end < full.length ? end : null,
+      hidden: hiddenReason(element),
+    };
   };
 
   /**

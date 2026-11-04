@@ -6,6 +6,32 @@ This extension has its own version line, independent of the Foxl Desktop release
 number. It used to ship inside the Foxl monorepo, where a script kept its manifest
 version pinned to the app's unified line; the split makes the two independent.
 
+## v0.11.0 - unreleased
+
+### Added
+
+- A page read says what it cuts. A line shows at most 100 characters of an element's
+  text (200 of a field's value); a longer one now ends on "…" and carries
+  `clipped=100/<total>`, and the read lists them in `clippedElements`. Until now the
+  rest was dropped with no mark, so a 5,000-character answer read as complete.
+- `read_text` reads one element's whole text by its ref, a slice at a time, exactly as
+  the page holds it (never a password or hidden field).
+- Read with the `all` filter, an element that is not drawn carries `hidden` and one
+  hidden from assistive technology `aria-hidden`, so a hidden error message is no
+  longer read as the page's state.
+- Downloads a Foxl task tab starts are reported, with their file name, size and state
+  (`get_downloads`, and with the next read of that tab). This needs the new
+  `downloads` permission: Chrome asks you to accept "Manage your downloads" when the
+  update arrives and keeps Foxl off until you do. Your other downloads are never read.
+- A pop-up Chrome blocked is reported with the page (`blockedPopups`), and every tab
+  names the tab that opened it (`openerTabId`).
+- The build announces what it can do (`capabilities`) when it connects.
+
+### Documented
+
+- `switch_tab` moves where the agent's commands go; it never brings that tab to the
+  front of your window.
+
 ## v0.10.0 - October 27, 2026
 
 ### Changed

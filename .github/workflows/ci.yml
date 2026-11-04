@@ -63,3 +63,23 @@ jobs:
             exit 1
           fi
           echo "manifest and changelog agree on v${VERSION}"
+
+  # The page reads, in the real extension (#6245): an unpacked copy in Chromium against a fictional
+  # local site, driven over the desktop's browser_command protocol (scripts/browser/harness.mjs).
+  # The only job here that installs anything: Playwright and ws, the test's own devDependencies.
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install the test's devDependencies and Chromium
+        run: |
+          npm install --include=dev --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Page reads mark what they cut
+        run: npm run test:browser

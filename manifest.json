@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Foxl",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "AI agent for browser automation - reads pages, clicks, types, and navigates on your behalf",
   "homepage_url": "https://github.com/foxl-ai/browser-extension",
   "action": {
@@ -21,6 +21,13 @@
     }
   },
   "content_scripts": [
+    {
+      "js": ["src/content-scripts/popup-watch.js"],
+      "matches": ["<all_urls>"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    },
     {
       "js": ["src/content-scripts/accessibility-tree.js"],
       "matches": ["<all_urls>"],
@@ -45,7 +52,8 @@
     "tabs",
     "tabGroups",
     "alarms",
-    "debugger"
+    "debugger",
+    "downloads"
   ],
   "host_permissions": [
     "<all_urls>"
