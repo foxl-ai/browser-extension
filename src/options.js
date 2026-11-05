@@ -107,11 +107,17 @@ chrome.storage.local.get(['serverUrl', 'appearance'], (result) => {
 });
 
 // Check connection status
+let desktopRequiresBridge = false;
+
 async function checkConnection() {
   try {
     const response = await chrome.runtime.sendMessage({ type: 'GET_SERVER_STATUS' });
-    updateStatus(response.connected, response.serverUrl, response);
-    return Boolean(response.connected);
+    // The desktop still answers its health check while it refuses this extension's socket for lack of the
+    // bridge (4004), so `connected` alone would read as working.
+    desktopRequiresBridge = Boolean(response.desktopRequiresBridge);
+    const connected = Boolean(response.connected) && !desktopRequiresBridge;
+    updateStatus(connected, response.serverUrl, response);
+    return connected;
   } catch (err) {
     updateStatus(false);
     return false;
@@ -130,7 +136,10 @@ async function checkConnection() {
  */
 function updateStatus(connected, serverUrl, peer) {
   statusDot.classList.toggle('connected', connected);
-  if (connected && peer?.transport === 'native') {
+  if (peer?.desktopRequiresBridge) {
+    statusText.textContent = 'Foxl Desktop needs the verified browser connection: in Foxl Desktop, open Settings > Web Access and choose Reinstall browser connection';
+    statusText.removeAttribute('title');
+  } else if (connected && peer?.transport === 'native') {
     statusText.textContent = 'Connected to Foxl Desktop';
     statusText.title = 'Over the verified browser connection';
   } else if (connected && serverUrl) {
@@ -138,9 +147,6 @@ function updateStatus(connected, serverUrl, peer) {
     statusText.title = `${serverUrl}, over a local port`;
   } else if (connected) {
     statusText.textContent = 'Connected to Foxl Desktop';
-  } else if (peer?.desktopRequiresBridge) {
-    statusText.textContent = 'Foxl Desktop needs the verified browser connection: in Foxl Desktop, open Settings > Web Access and choose Reinstall browser connection';
-    statusText.removeAttribute('title');
   } else {
     statusText.textContent = 'Open Foxl Desktop to connect';
     statusText.removeAttribute('title');
@@ -202,7 +208,9 @@ testButton.addEventListener('click', async () => {
   try {
     await chrome.runtime.sendMessage({ type: 'CONNECT_TO_SERVER' });
     const connected = await checkConnection();
-    showMessage(connected ? 'Connected to Foxl Desktop.' : 'Open Foxl Desktop and try again.', connected ? 'success' : 'error');
+    showMessage(connected ? 'Connected to Foxl Desktop.'
+      : desktopRequiresBridge ? 'In Foxl Desktop, open Settings > Web Access and choose Reinstall browser connection.'
+        : 'Open Foxl Desktop and try again.', connected ? 'success' : 'error');
   } catch (err) {
     showMessage('Failed to connect: ' + err.message, 'error');
     updateStatus(false);

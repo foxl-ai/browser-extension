@@ -56,8 +56,12 @@ function extensionCopy(port, grant = []) {
 /**
  * Starts the site + the desktop socket, then Chromium with the extension. `routes` maps a path to
  * `(req, res)`. Resolves once the extension's worker has connected and announced itself.
+ *
+ * `refuseSocket: 4004` closes every `/extension` socket at once with that code, as a Foxl Desktop that requires
+ * the verified browser connection refuses an unpaired one (0.14.0); the launch then resolves without waiting for
+ * an announcement, and `announced` is null.
  */
-export async function launchExtension({ routes = {}, grant = [] } = {}) {
+export async function launchExtension({ routes = {}, grant = [], refuseSocket = null } = {}) {
   let socket = null;
   let hello = null;
   let nextId = 1;
@@ -81,6 +85,7 @@ export async function launchExtension({ routes = {}, grant = [] } = {}) {
   server.on('upgrade', (req, sock, head) => {
     if (new URL(req.url, 'http://localhost').pathname !== '/extension') { sock.destroy(); return; }
     sockets.handleUpgrade(req, sock, head, (ws) => {
+      if (refuseSocket) { ws.close(refuseSocket, 'extension_pairing_required'); return; }
       socket = ws;
       ws.on('message', (raw) => {
         let msg;
@@ -120,7 +125,7 @@ export async function launchExtension({ routes = {}, grant = [] } = {}) {
       args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
       acceptDownloads: true,
     });
-    announced = await Promise.race([
+    announced = refuseSocket ? null : await Promise.race([
       helloSeen,
       new Promise((_, reject) => { helloTimer = setTimeout(() => reject(new Error('the extension never connected to the test desktop')), 20_000); }),
     ]);

@@ -98,6 +98,16 @@ The page's requests are counted by `request-watch.js`, in the page's own world (
 
 A tab whose page cannot be armed (one loaded before the extension updated, a page without content scripts) runs the step as 0.11 did, with no `step`.
 
+## The native channel to Foxl Desktop (0.14)
+
+The extension reaches Foxl Desktop through Chrome's native messaging first: `chrome.runtime.connectNative('ai.foxl.browser_bridge')`, the host Foxl Desktop installs (its manifest's `allowed_origins` names this extension's store ID: the store gives its own build that ID, and the manifest's `key` gives it to a copy loaded unpacked from this repository; `scripts/build.mjs` leaves `key` out of the zip the store receives). Frames on that port are objects, not strings; the protocol inside is the WebSocket's, unchanged.
+
+- **Only a `pong` opens the channel.** The extension sends `{ type: "ping" }` and adopts the port only on `{ type: "pong" }`, which the host sends once it has reached the desktop; anything else, or nothing within 3 s, is no host.
+- **No host is a normal answer.** "Specified native messaging host not found." (no manifest) or "Access to the specified native messaging host is forbidden." (another ID) sends the extension to the WebSocket, as before.
+- `extension_connected` adds `transport: "native" | "websocket"` beside `version` and `capabilities`.
+- **A desktop that requires the bridge closes an unpaired socket with `4004 extension_pairing_required`.** Then `GET_SERVER_STATUS` reports `desktopRequiresBridge: true` (and `wsConnected: false`) until a channel opens, and the side panel and the options page say to open Foxl Desktop's Settings > Web Access and choose Reinstall browser connection, instead of reading as connected through the health check.
+- A custom server URL changes only the WebSocket's destination; the bridge always reaches the desktop that installed it.
+
 Capture supports HTTP(S) pages, and file pages with "Allow access to file URLs" on. The selected
 tab of a window is captured with `tabs.captureVisibleTab`; only a background tab is attached to.
 It checks the site-access grant using `scripting.executeScript`, hides its own overlay, and
