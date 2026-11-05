@@ -191,7 +191,7 @@ function clearDiscoveredUrl() {
  *  THE LOCAL CHANNEL: NATIVE MESSAGING FIRST, THE WebSocket SECOND
  * ══════════════════════════════════════════════════════════════════════════════
  *
- * 🔴 A LOOPBACK WebSocket CANNOT TELL THIS EXTENSION FROM ANY OTHER PROGRAM ON THE
+ * A LOOPBACK WebSocket CANNOT TELL THIS EXTENSION FROM ANY OTHER PROGRAM ON THE
  * MACHINE, AND NO AMOUNT OF CARE AT THIS END FIXES THAT. The desktop's `/extension`
  * path used to be gated on the `Origin:` header alone. A BROWSER sets that header and
  * a web page cannot forge it, which makes it a real defence against a page - and it is
