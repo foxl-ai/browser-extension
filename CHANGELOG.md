@@ -14,15 +14,18 @@ version pinned to the app's unified line; the split makes the two independent.
   reads the page. Until now a click answered as soon as it was made, before the form's
   page started loading, so a read sent right after it could show the form again; that is
   how one bill dispute was filed twice. The answer now also says what the step sent and
-  what the page shows (`step`). A click that changes nothing answers at once, as before,
-  and a single-page app's view change waits only for that view.
+  what the page shows (`step`). Only a form being sent, or a page load the step started,
+  is waited for: a click that changes nothing, a single-page app's view change and a page
+  that keeps changing answer at once, as before, and a download or a 204 answers as soon
+  as the site does.
 
 ### Added
 
 - The same form is not sent twice by mistake. When Foxl Desktop says a chat already sent
   a form with the same choices, a submit of it during Foxl's own step is stopped and
-  reported, so Foxl looks for the first filing before it sends again. Your own clicks are
-  never stopped.
+  reported, so Foxl looks for the first filing before it sends again. A different item (a
+  product in a hidden field or on its button) is another form, and a payment the page
+  itself refused is never counted as sent. Your own clicks are never stopped.
 - The build announces `step-watch`.
 
 ## v0.11.0 - November 4, 2026

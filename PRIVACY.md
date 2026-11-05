@@ -31,7 +31,7 @@ about them is more useful than a reassuring summary:
 | Tab URLs and titles | So a task can move between sites and the agent knows where it is | The configured Foxl server |
 | Your side-panel messages and recent replies | To answer your request and follow-up questions | The configured Foxl server |
 | Actions the agent performs: clicks, typed text, navigation | They are the work itself | Performed in your browser |
-| After a click or key press that sent a form or loaded a page: the page's title, first heading and first 300 characters of text, and the form's address, its button's words and up to eight of its answers (the choices: boxes ticked, options, amounts, dates; never a hidden field, and never a form with a password field) | So Foxl knows what the step did before it reads the page, and does not send the same form twice by mistake | The configured Foxl server |
+| After a click or key press that sent a form or loaded a page: the page's title, first heading and first 300 characters of text, and the form's address, its button's words and up to eight of its answers (the choices: boxes ticked, options, amounts, dates; its stable hidden fields such as a product id, never a per-load token; never a form with a password field) | So Foxl knows what the step did before it reads the page, and does not send the same form twice by mistake | The configured Foxl server |
 | Your settings: the server URL and appearance preference | So you do not re-enter them | `chrome.storage.local`, on your machine only |
 
 Page content can include whatever is on the page, and that may be personal:

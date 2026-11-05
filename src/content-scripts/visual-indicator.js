@@ -419,7 +419,15 @@
        */
       case 'STEP_ARM':
         try {
-          sendResponse(window.__foxlStepArm?.(message.hold) || { success: false, error: 'Function not available' });
+          sendResponse(window.__foxlStepArm?.(message.hold, message.chat) || { success: false, error: 'Function not available' });
+        } catch (err) {
+          sendResponse({ success: false, error: err.message });
+        }
+        break;
+
+      case 'STEP_LOOK':
+        try {
+          sendResponse(window.__foxlStepLook?.(message.origin, message.chat) || { success: false, error: 'Function not available' });
         } catch (err) {
           sendResponse({ success: false, error: err.message });
         }
@@ -427,7 +435,7 @@
 
       case 'STEP_SETTLE':
         Promise.resolve()
-          .then(() => (window.__foxlStepSettle ? window.__foxlStepSettle(message.origin) : { success: false, error: 'Function not available' }))
+          .then(() => (window.__foxlStepSettle ? window.__foxlStepSettle(message.origin, message.chat) : { success: false, error: 'Function not available' }))
           .then((r) => sendResponse(r), (err) => sendResponse({ success: false, error: err.message }));
         break;
 
