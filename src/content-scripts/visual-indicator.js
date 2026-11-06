@@ -411,6 +411,41 @@
           sendResponse({ success: false, error: err.message });
         }
         break;
+
+      /*
+       * What a step did (step-watch.js, foxl-ai/pilot #6394): armed before a click or a key press,
+       * settled after it (that one waits for the step's answer, so it answers asynchronously), and the
+       * page a navigation led to.
+       */
+      case 'STEP_ARM':
+        try {
+          sendResponse(window.__foxlStepArm?.(message.hold, message.chat) || { success: false, error: 'Function not available' });
+        } catch (err) {
+          sendResponse({ success: false, error: err.message });
+        }
+        break;
+
+      case 'STEP_LOOK':
+        try {
+          sendResponse(window.__foxlStepLook?.(message.origin, message.chat) || { success: false, error: 'Function not available' });
+        } catch (err) {
+          sendResponse({ success: false, error: err.message });
+        }
+        break;
+
+      case 'STEP_SETTLE':
+        Promise.resolve()
+          .then(() => (window.__foxlStepSettle ? window.__foxlStepSettle(message.origin, message.chat) : { success: false, error: 'Function not available' }))
+          .then((r) => sendResponse(r), (err) => sendResponse({ success: false, error: err.message }));
+        break;
+
+      case 'STEP_PAGE':
+        try {
+          sendResponse(window.__foxlStepPage?.(message.origin) || { success: false, error: 'Function not available' });
+        } catch (err) {
+          sendResponse({ success: false, error: err.message });
+        }
+        break;
     }
     return true; // Keep channel open for async response
   });

@@ -124,6 +124,8 @@ button "Sign in" [ref_5]
 
 A line shows at most 100 characters of an element's text (200 of a field's value). A longer one ends on `…` and says how much it shows, `clipped=100/5000`, and the agent can read that element's whole text by its ref, a slice at a time. Read with the `all` filter, which also lists what the page is not showing, an element that is not drawn carries `hidden` and one hidden from assistive technology `aria-hidden`, so a hidden error message is never taken for the page's state. A pop-up Chrome blocked is reported with the page, every tab names the tab that opened it, and, once you allow download receipts on the options page, a download that a Foxl task tab starts is reported with its file name, size and state, so a page's "your file is ready" is never the only receipt. `switch_tab` changes which tab the agent's commands go to; it never brings that tab to the front of your window.
 
+A click, a key press, or typing that presses Enter waits for what it sent before it answers: a form's answer (the page it loads, or the requests the page sends for it) or the page a followed link loads, for at most about 12 seconds. The answer then says what the page shows, and which form was sent. A click that sends nothing, such as a single-page app's view change, answers at once. When Foxl Desktop says a chat already sent a form with the same choices (the boxes ticked, the options chosen, the amounts and dates typed), a submit of that form during Foxl's own step is stopped and reported, so the same dispute or order is not sent twice by mistake. A sign-in step (a username, a password or a one-time code) is never described. Only a submit made while Foxl's own step waits for its answer is looked at: a form you send yourself at any other time is never described or stopped.
+
 Screenshots capture a background tab without selecting it, including a chosen rectangle or the full document. On a compatible desktop, snapshots can return just the changes since a previously read snapshot. A service worker handles the desktop connection, tab management, and command dispatch; content scripts carry out page actions and display activity indicators.
 
 ## Where your data goes
@@ -143,6 +145,7 @@ The network entry points are small enough to inspect directly:
 | Source | Requests |
 | :--- | :--- |
 | [Service worker](src/service-worker.js) | Health probes at `/api/health`, a WebSocket at `/extension`, and chat requests at `/api/chat` |
+| [Request watch](src/content-scripts/request-watch.js) | None. It wraps the page's own `fetch` and `XMLHttpRequest` to count the requests still running, and passes every call through unchanged |
 
 The settings page asks the service worker for its actual connection status.
 
@@ -169,8 +172,8 @@ The manifest requests access to all sites so the agent can work on the pages you
 | `alarms` | Maintain the service worker's connection lifecycle. |
 | `downloads` (optional) | Only after you choose **Allow** under **Download receipts** on the options page: see the downloads a Foxl task tab starts (file name, size, state) so Foxl can confirm a file was really saved. Your other downloads are never read. |
 
-Version 0.11.0 requests the same permissions as 0.9.0, and the update installs without a
-prompt. Its one new permission, `downloads`, is optional: Chrome asks for it ("Manage your
+Versions 0.11.0 and 0.12.0 request the same permissions as 0.9.0, and the update installs
+without a prompt. The one permission 0.11.0 added, `downloads`, is optional: Chrome asks for it ("Manage your
 downloads") only when you choose **Allow** under **Download receipts** on the options page,
 and **Turn off** there takes it back. If you are upgrading from 0.8.x or earlier, Chrome
 asks you to accept the `debugger` permission introduced in 0.9 ("Access the page debugger

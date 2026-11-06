@@ -128,8 +128,10 @@ let focusedTabId = null; // The tab currently focused for agent operations
  * build before 0.11.0 sends `{ version }` only). #6245: tree lines mark what they cut and what is
  * not shown (`read-marks`), one element's whole text is read by ref (`read-text`), a Foxl task
  * tab's downloads are reported (`downloads`), and tabs carry their opener (`tab-openers`).
+ * 0.12.0 (foxl-ai/pilot #6394): a click or a key press waits for what it started and reports it,
+ * and holds back a form the desktop's chat already sent (`step-watch`, step-watch.js).
  */
-const CAPABILITIES = ['read-marks', 'read-text', 'downloads', 'tab-openers'];
+const CAPABILITIES = ['read-marks', 'read-text', 'downloads', 'tab-openers', 'step-watch'];
 
 /*
  * WHERE FOXL LAST ACTED: the last time Foxl clicked, typed, pressed a key, chose an option or
@@ -502,8 +504,27 @@ async function executeBrowserCommand(command) {
   const targetTabId = await resolveTargetTab(tabId);
   // A navigation to a file downloads from the site it names, so it is remembered with that one.
   if (targetTabId && (INPUT_ACTIONS.has(action) || action === 'navigate')) await noteActed(targetTabId, action === 'navigate' ? params?.url : null);
-  
+
   try {
+    // 0.12.0 (foxl-ai/pilot #6394): a click or a key press that sends a form is watched until its answer starts.
+    const watched = targetTabId && stepWatched(action, params) ? await armStep(targetTabId, params?.hold, params?.chat) : null;
+    if (watched) {
+      let result = null;
+      try {
+        result = await runWatchedStep(action, targetTabId, params, deadline);
+      } finally {
+        // A step whose action failed or threw is read too, which ends it in the page: left armed, the page would look at
+        // every submit for the rest of its hold window, and those are the person's own (described, and stopped when held).
+        // Its answer stays the failure it was.
+        if (!result || result.success === false) await endStep(targetTabId, watched).catch(() => null);
+      }
+      const step = result && result.success !== false ? await finishStep(targetTabId, watched) : null;
+      const out = step && step.settled !== 'nothing' ? { ...result, step } : { ...result };
+      // A form a stopped step of this chat sent here: held this time, and reported for the desktop to record.
+      if (watched.leftover) out.leftover = watched.leftover;
+      // Nothing happened: the answer is what it always was.
+      return step && step.settled !== 'nothing' || watched.leftover ? out : result;
+    }
     switch (action) {
       case 'get_accessibility_tree':
         if (params?.snapshot) return withDownloads(await getPageSnapshot(targetTabId, params), targetTabId);
@@ -1034,7 +1055,7 @@ async function navigateTab(tabId, url) {
  * extension answers before the desktop's 30 s timeout ever fires.
  */
 const LOAD_WAIT_MS = 25000;
-function waitForTabLoad(tabId, { alreadyStarted = false } = {}) {
+function waitForTabLoad(tabId, { alreadyStarted = false, waitMs = LOAD_WAIT_MS } = {}) {
   return new Promise((resolve) => {
     let done = false;
     const finish = () => {
@@ -1048,13 +1069,143 @@ function waitForTabLoad(tabId, { alreadyStarted = false } = {}) {
       if (updatedTabId === tabId && changeInfo.status === 'complete') finish();
     };
     chrome.tabs.onUpdated.addListener(listener);
-    const timer = setTimeout(finish, LOAD_WAIT_MS);
+    const timer = setTimeout(finish, waitMs);
     if (alreadyStarted) {
       chrome.tabs.get(tabId).then((tab) => {
         if (tab.status === 'complete' && tab.url && tab.url !== 'about:blank') finish();
       }).catch(finish);
     }
   });
+}
+
+/*
+ * WHAT A CLICK OR A KEY PRESS SENT (0.12.0, foxl-ai/pilot #6394; the page side is step-watch.js). A
+ * click returns as soon as the content script has clicked, before a form's navigation starts, so a
+ * read sent with it saw the form again and one bill dispute was filed twice. Here a read sent while a
+ * page load is under way reaches the OLD page (unlike Foxl's own browser, whose next read waits for it),
+ * so a load the step started is waited out before the step answers. The design is the desktop's
+ * (foxl-ai/pilot server/tools/browser-step-watch.ts):
+ *   1. armed before the step (`STEP_ARM`, with `hold`: the forms the desktop's chat already sent, and
+ *      `chat`: that chat's key, which finds a form a stopped step of the chat left on this site);
+ *   2. asked at once after it (`STEP_LOOK`): a step that sent no form and started no page load is done;
+ *   3. for a form, waited on in the page until its answer starts (`STEP_SETTLE`);
+ *   4. a page load, then waited out and the page it led to read (`STEP_PAGE`): a new page, or the same one
+ *      for a download or a 204, as soon as the tab stops loading, never past STEP_SETTLE_MS.
+ */
+const STEP_SETTLE_MS = 8000;
+/*
+ * How long STEP_SETTLE's answer is waited for HERE: the page's own loop (STEP_SETTLE_MS, then at most 1.5 s of quiet),
+ * plus a second. That loop runs on the page's timers, which do not run while the page shows a dialog (an alert() after a
+ * fetch-sent form: the answer came 40 s later with the dialog open 40 s, past the desktop's 30 s timeout) and are
+ * throttled in a tab the person is not looking at; this timer is the service worker's own.
+ */
+const STEP_SETTLE_ANSWER_MS = STEP_SETTLE_MS + 2500;
+const LATE = Symbol('late');
+
+/** The steps that can send a form or start a navigation: a click, a key press, and typing that presses Enter. */
+function stepWatched(action, params) {
+  return action === 'click' || action === 'click_at' || action === 'press_key' || (action === 'type' && params?.submit === true);
+}
+
+function runWatchedStep(action, tabId, params, deadline) {
+  switch (action) {
+    case 'click': return clickElement(tabId, params.refId, deadline);
+    case 'click_at': return clickAt(tabId, params?.x, params?.y, deadline);
+    case 'press_key': return pressKey(tabId, params?.key, params?.refId, deadline);
+    case 'type': return typeInElement(tabId, params.refId, params.text, params.submit, deadline);
+    default: return Promise.resolve({ success: false, error: `Unknown action: ${action}` });
+  }
+}
+
+/** A message to the tab's top frame, or null when no page there answers (gone, or not there yet); LATE past `waitMs`. */
+async function askTopFrame(tabId, message, waitMs = 0) {
+  try {
+    const answer = chrome.tabs.sendMessage(tabId, message, { frameId: 0 });
+    if (!waitMs) return await answer;
+    answer.catch(() => {});
+    let timer;
+    const late = new Promise((resolve) => { timer = setTimeout(() => resolve(LATE), waitMs); });
+    try { return await Promise.race([answer, late]); } finally { clearTimeout(timer); }
+  } catch {
+    return null;
+  }
+}
+
+/** Arms the tab's page (its top frame), or null when it cannot be armed: the step then runs as before. */
+async function armStep(tabId, hold, chat) {
+  const r = await askTopFrame(tabId, { type: 'STEP_ARM', hold: Array.isArray(hold) ? hold : [], chat: typeof chat === 'string' ? chat : '' });
+  return r && r.success && typeof r.origin === 'number'
+    ? { origin: r.origin, chat: typeof chat === 'string' ? chat : '', leftover: r.leftover || null }
+    : null;
+}
+
+/**
+ * Until the tab's page load is over, at most `waitMs`. A load that has not shown yet (the navigation starts in a
+ * later task) is looked for briefly; a tab that never starts loading has nothing to wait for. True when it ended.
+ */
+async function waitForPageLoadEnd(tabId, waitMs) {
+  const until = Date.now() + waitMs;
+  const status = async () => { try { return (await chrome.tabs.get(tabId)).status; } catch { return 'complete'; } };
+  let seenLoading = false;
+  for (const lookUntil = Date.now() + 500; Date.now() < lookUntil && !seenLoading; ) {
+    if (await status() === 'loading') seenLoading = true; else await new Promise((r) => setTimeout(r, 50));
+  }
+  if (!seenLoading) return true;
+  while (Date.now() < until) {
+    if (await status() === 'complete') return true;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return false;
+}
+
+/** The page a step's page load led to: a new page, the same one (a download, a 204), or still loading at the bound. */
+async function pageAfterStep(tabId, armed, started, form, followedLink) {
+  const ended = await waitForPageLoadEnd(tabId, Math.max(1000, STEP_SETTLE_MS - (Date.now() - started)));
+  for (let i = 0; i < 10; i++) {
+    const p = await askTopFrame(tabId, { type: 'STEP_PAGE', origin: armed.origin });
+    if (p && p.success) {
+      const waitedMs = Date.now() - started;
+      if (!ended) return { settled: 'still_loading', navigated: true, submitted: form, blocked: null, waitedMs, page: null };
+      // A link that led nowhere new (a download): the step's answer is what it always was.
+      if (followedLink && !p.newDocument) return null;
+      return { settled: p.newDocument || followedLink ? 'answered' : 'no_page', navigated: true, submitted: form, blocked: null, waitedMs, page: p.page || null };
+    }
+    // The new page's scripts are not there yet.
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return { settled: 'still_loading', navigated: true, submitted: form, blocked: null, waitedMs: Date.now() - started, page: null };
+}
+
+/**
+ * After an action that failed or threw: the step is read only to end it in the page (a look ends a step that sent
+ * nothing; a form that went out anyway is waited on, bounded, so the page still counts it). No page answering: nothing to end.
+ */
+async function endStep(tabId, armed) {
+  const look = await askTopFrame(tabId, { type: 'STEP_LOOK', origin: armed.origin, chat: armed.chat }, 2000);
+  if (look && look !== LATE && look.success && look.phase === 'submitting') {
+    await askTopFrame(tabId, { type: 'STEP_SETTLE', origin: armed.origin, chat: armed.chat }, STEP_SETTLE_ANSWER_MS);
+  }
+}
+
+/** What the step sent, or null when the page could not say (the step's own answer then stands). */
+async function finishStep(tabId, armed) {
+  const started = Date.now();
+  const report = (r) => ({ settled: r.settled, navigated: !!r.navigated, submitted: r.submitted || null, blocked: r.blocked || null, waitedMs: Date.now() - started, page: r.page || null });
+  const look = await askTopFrame(tabId, { type: 'STEP_LOOK', origin: armed.origin, chat: armed.chat });
+  // No page answered: the step's page load is under way (or committed before the look). Wait it out and read it.
+  if (!look || !look.success) return pageAfterStep(tabId, armed, started, null, false);
+  if (look.phase === 'done') {
+    // A link the step followed: a read sent now would reach the page being left, so its load is waited out.
+    if (look.settled === 'nothing' && look.navigated) return pageAfterStep(tabId, armed, started, null, true);
+    return report(look);
+  }
+  // A form being sent: until its answer starts.
+  const settle = await askTopFrame(tabId, { type: 'STEP_SETTLE', origin: armed.origin, chat: armed.chat }, STEP_SETTLE_ANSWER_MS);
+  // The page did not answer in time (a dialog, a throttled tab): sent if the page had counted it, and still going.
+  if (settle === LATE) return { settled: 'still_loading', navigated: !!look.navigated, submitted: look.counted ? look.submitted || null : null, blocked: null, waitedMs: Date.now() - started, page: null };
+  // A page load started (or the page went away while it waited): the form went out; its answer is that load.
+  if (!settle || !settle.success || settle.settled === 'navigating') return pageAfterStep(tabId, armed, started, look.submitted || null, false);
+  return report(settle);
 }
 
 /**

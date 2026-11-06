@@ -6,6 +6,34 @@ This extension has its own version line, independent of the Foxl Desktop release
 number. It used to ship inside the Foxl monorepo, where a script kept its manifest
 version pinned to the app's unified line; the split makes the two independent.
 
+## v0.12.0 - November 6, 2026
+
+### Fixed
+
+- A click or a key press that sends a form now waits for the site's answer before Foxl
+  reads the page. Until now a click answered as soon as it was made, before the form's
+  page started loading, so a read sent right after it could show the form again; that is
+  how one bill dispute was filed twice. The answer now also says what the step sent and
+  what the page shows (`step`). Only a form being sent, or a page load the step started,
+  is waited for: a click that changes nothing, a single-page app's view change and a page
+  that keeps changing answer at once, as before, and a download or a 204 answers as soon
+  as the site does.
+
+### Added
+
+- The same form is not sent twice by mistake. When Foxl Desktop says a chat already sent
+  a form with the same choices, a submit of it during Foxl's own step is stopped and
+  reported, so Foxl looks for the first filing before it sends again. A different item (a
+  product in a hidden field or on its button) is another form, and a payment the page
+  itself refused is never counted as sent. Only a submit made while one of Foxl's own
+  clicks or key presses waits for its answer is looked at, so a form you send yourself at
+  any other time is never described or stopped.
+- A sign-in step is never described, like a form with a password field: a form whose
+  fields ask for a username, a current password or a one-time code (by their autocomplete
+  tokens) is left out of the report, so an address or a code typed there is not sent back,
+  and trying that step again is never held back.
+- The build announces `step-watch`.
+
 ## v0.11.0 - November 4, 2026
 
 ### Added
