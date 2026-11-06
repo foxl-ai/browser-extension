@@ -71,7 +71,7 @@ beside `version`; a desktop gates the new actions on these names. Every earlier 
   - `"blocked"`: a held form, below.
 - `navigated`: a page load happened.
 - `page`: `{ title, heading, text }` of the page after the step: the title (120 characters), the first `h1` (160) and the start of the page's text (300).
-- `submitted` and `blocked`: `{ digest, host, action, label, summary }` for a POST form with no password field. `submitted` is set only for a form that was sent (never an unconfirmed one).
+- `submitted` and `blocked`: `{ digest, host, action, label, summary }` for a POST form with no password field that is not a sign-in step (a field whose `autocomplete` holds `username`, `current-password` or `one-time-code`, foxl-ai/pilot #6550). `submitted` is set only for a form that was sent (never an unconfirmed one).
   - `action` is the form's path and `label` the submit control's own words;
   - `summary` holds up to eight `name: value` lines of the form's identity, each value cut at 60 characters, with runs of 12 or more digits shown as `...`.
 
@@ -82,11 +82,13 @@ beside `version`; a desktop gates the new actions on these names. Every earlier 
 - the submit button's own name and value;
 - its place among the page's POST forms to the same action.
 
-The digest is FNV-1a over that identity. It is computed by the same source as the desktop's own browser (`DESCRIBE_FORM_SOURCE`, copied verbatim into `step-watch.js`), so a chat that uses both browsers matches; change both together.
+The digest is FNV-1a over that identity. It is computed by the same source as the desktop's own browser (`DESCRIBE_FORM_SOURCE`, copied verbatim into `step-watch.js`), so a chat that uses both browsers matches; change both together. Both repositories pin the SHA-256 of that text, each line's surrounding whitespace removed (`scripts/step-watch-describe.test.mjs` here, `tests/step-watch-saved-sign-in.regression.test.mjs` in foxl-ai/pilot).
 
-**The hold** stops a submit whose digest is in `hold` before the page's own handlers run, and reports it as `blocked`. Only a submit during the step is looked at: within 10 s of its start, and before it is read. So a form the person sends is never described and never stopped.
+**The hold** stops a submit whose digest is in `hold` before the page's own handlers run, and reports it as `blocked`. Only a submit during the step is looked at: within 10 s of its start, and before it is read. A step whose action failed is read at once too, which ends it. So a form the person sends outside a step is never described and never stopped.
 
-**A step whose answer was never read** (the desktop stopped waiting) leaves its form in the page's `sessionStorage` (this chat only, same origin, 30 minutes). The next arm on that site holds it and returns it as `leftover`, for the desktop to record.
+The service worker waits for a form's answer (`STEP_SETTLE`) at most `STEP_SETTLE_ANSWER_MS` (10.5 s) by its own timer, then reports `still_loading`: the page's loop runs on the page's timers, which do not run while the page shows a dialog and are throttled in a background tab.
+
+**A step whose answer was never read** (the desktop stopped waiting) leaves its form in the page's `sessionStorage` (this chat only, same origin, 30 minutes). The next arm on that site holds it and returns it as `leftover`, for the desktop to record. Every described submit writes that record, and the next arm in that tab removes it; what leaves it is cut to a real description's shape and sizes, since the page can write the same key.
 
 The page's requests are counted by `request-watch.js`, in the page's own world (`"world": "MAIN"`), because the content scripts' isolated world cannot see the page's `fetch` or `XMLHttpRequest`:
 - It wraps them **only from a step's own submit until the step is read** (`foxl-step-requests`: `watch <origin>` / `unwatch`), then puts the page's own back (only if they are still ours).

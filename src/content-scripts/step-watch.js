@@ -27,7 +27,8 @@
  * (boxes ticked, options chosen, amounts, dates) or every answer when it is only words, its stable hidden
  * fields (a product id; per-load tokens and long state blobs are left out), the submit button's own name and
  * value, and its place among the page's POST forms to the same action; a form with a password field is never
- * described. A submit of a held form during the step is stopped before the page's own
+ * described, and neither is a sign-in step: a form that sends a username, a current password or a one-time code
+ * by its fields' autocomplete tokens (foxl-ai/pilot #6550). A submit of a held form during the step is stopped before the page's own
  * handlers run and reported as `blocked`. Only a submit during Foxl's own step is looked at, so a form the
  * person sends is never described or stopped.
  *
@@ -47,11 +48,24 @@
   const SENT_KEY = '__foxlStepSent';
 
   // The page's description of a submitted POST form, or null (a GET form, a sign-in, nothing in it).
-  // KEEP IN STEP with foxl-ai/pilot server/tools/browser-step-watch.ts DESCRIBE_FORM_SOURCE: the digest must match.
+  // KEEP IN STEP with foxl-ai/pilot server/tools/browser-step-watch.ts DESCRIBE_FORM_SOURCE: the digest must match, so
+  // the two are the same text, comments included, line for line but for indentation. Both repositories pin its SHA-256
+  // (scripts/step-watch-describe.test.mjs here, tests/step-watch-saved-sign-in.regression.test.mjs there).
   const describe = (form, submitter) => {
     const method = String((submitter && submitter.getAttribute('formmethod')) || form.getAttribute('method') || 'get').toLowerCase();
     if (method !== 'post') return null;
     if (form.querySelector('input[type=password]')) return null;
+    // A SIGN-IN FOXL TYPED FROM THE PERSON'S SAVED SIGN-INS IS NEVER DESCRIBED, NOR THE FORM THAT HOLDS IT (foxl-ai/pilot
+    // #6550): what a saved sign-in typed is not the model's to read, and a summary is what NOT_SENT_AGAIN quotes back to it.
+    // Each browser marks what it typed: Foxl's own browser (fill_login) puts data-foxl-saved-sign-in on the field and its
+    // form; the extension (fill_sign_in) keeps the field in __foxlFilledFields, its isolated world's set, which no page can reach.
+    const savedSignIn = window.__foxlFilledFields;
+    const typedFromSaved = (el) => el.hasAttribute('data-foxl-saved-sign-in') || !!(savedSignIn && savedSignIn.has(el));
+    if (typedFromSaved(form) || Array.from(form.elements).some(typedFromSaved)) return null;
+    // The second line, for a field the page drew again after the fill (the mark left with the old element): a form that
+    // sends a username, a current password or a one-time code, by the field's own autocomplete tokens, is a sign-in step.
+    const SIGN_IN_TOKENS = /(?:^|\s)(?:username|current-password|one-time-code)(?:\s|$)/i;
+    if (Array.from(form.elements).some((el) => el.name && !el.disabled && String(el.value == null ? '' : el.value).trim() && SIGN_IN_TOKENS.test(String(el.getAttribute('autocomplete') || '')))) return null;
     let action;
     try { action = new URL((submitter && submitter.getAttribute('formaction')) || form.getAttribute('action') || location.href, location.href); } catch (e) { return null; }
     const fields = [];
@@ -70,14 +84,20 @@
       } else if (tag === 'TEXTAREA') fields.push([el.name, el.value, false]);
       else if (tag === 'SELECT') for (const o of Array.from(el.selectedOptions)) fields.push([el.name, o.value, true]);
     }
+    // An amount, a count or a date typed into a text box answers like a choice ("109.22", "$109.22", "2027-03-14").
     const choiceLike = (v) => /^[\s$€£¥₩+-]*\d[\d.,:\/\s-]*$/.test(v);
     const norm = fields.map(([n, v, s]) => [String(n), String(v == null ? '' : v).replace(/\s+/g, ' ').trim(), s]).filter(([, v]) => v);
     if (!norm.length && !hidden.length) return null;
+    // WHICH answers make it the same form: the choices (lines ticked, an amount, a date, a quantity) when there are
+    // any, so a rewritten explanation does not make a second filing of the same dispute look new (#6394: the
+    // second explanation added a sentence); every answer when the form is only words (a message, a comment);
+    // and its stable hidden fields either way.
     const choices = norm.filter(([, v, s]) => s || choiceLike(v)).map(([n, v]) => [n, v]);
     const byName = (a, b) => (a[0] + '=' + a[1] < b[0] + '=' + b[1] ? -1 : 1);
     // The submit button's own name and value are sent with the form: one form whose buttons carry the product.
     const own = submitter && submitter.name && !submitter.disabled ? [[String(submitter.name), String(submitter.value == null ? '' : submitter.value)]] : [];
     const identity = [...(choices.length ? choices : norm.map(([n, v]) => [n, v])).sort(byName), ...hidden.sort(byName), ...own];
+    // The page the form is on, without a link's tracking parameters: the same form on another product's page is another form.
     let onPage = location.pathname;
     try { const u = new URL(location.href); for (const k of Array.from(u.searchParams.keys())) if (/^(utm_|mc_)|^(gclid|fbclid|msclkid|_ga|ref)$/i.test(k)) u.searchParams.delete(k); onPage = u.pathname + u.search; } catch (e) { /* the path alone */ }
     // Which of the page's POST forms to this action it is, when it has several (a list of products or classes).
@@ -151,13 +171,17 @@
     const nodes = [...r.addedNodes, ...r.removedNodes];
     return !(nodes.length && nodes.every(foxlNode));
   });
-  const observe = () => {
+  // Only while a step is armed: from its arm until it is read. Every page has this script, and an observer left on
+  // all the time costs a page that changes a lot (100,000 text updates 10 -> 21 ms, measured in Chromium 156).
+  let observer = null;
+  const observe = (on) => {
+    if (!on) { if (observer) observer.disconnect(); observer = null; return; }
+    if (observer) return;
     try {
-      new MutationObserver((records) => { if (pageChanged(records)) s.mutatedAt = Date.now(); })
-        .observe(document.documentElement || document, { subtree: true, childList: true, characterData: true });
-    } catch { /* nothing to observe yet */ }
+      observer = new MutationObserver((records) => { if (pageChanged(records)) s.mutatedAt = Date.now(); });
+      observer.observe(document.documentElement || document, { subtree: true, childList: true, characterData: true });
+    } catch { observer = null; /* nothing to observe yet */ }
   };
-  if (document.documentElement) observe(); else document.addEventListener('DOMContentLoaded', observe, { once: true });
 
   window.addEventListener('submit', (e) => {
     const form = e.target;
@@ -195,10 +219,17 @@
   });
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // The step ends when it is read: its hold, the watch on submits and the request count end with it.
-  const end = () => { s.armedAt = 0; s.hold = new Set(); watchRequests(false); };
+  const end = () => { s.armedAt = 0; s.hold = new Set(); watchRequests(false); observe(false); };
   const answered = (chat) => {
     const o = peekSent();
-    return { success: true, phase: 'done', settled: 'answered', navigated: true, newDocument: true, submitted: o && o.chat === chat ? o.info : null, page: page() };
+    return { success: true, phase: 'done', settled: 'answered', navigated: true, newDocument: true, submitted: o && o.chat === chat ? formOf(o.info) : null, page: page() };
+  };
+  // The record sits in the page's own storage, which the page can write too: only describe's shape and sizes leave it,
+  // so what the desktop quotes from it (NOT_SENT_AGAIN) is never longer than a real description.
+  const formOf = (i) => {
+    if (!i || typeof i !== 'object' || typeof i.digest !== 'string' || !/^[0-9a-f]{16}$/.test(i.digest)) return null;
+    const str = (v, n) => (typeof v === 'string' ? v : '').slice(0, n);
+    return { digest: i.digest, host: str(i.host, 255), action: str(i.action, 2048), label: str(i.label, 80), summary: Array.isArray(i.summary) ? i.summary.slice(0, 8).map((l) => str(l, 200)) : [] };
   };
 
   /** Arms the page before a step; `hold` is the digests the desktop's chat already sent, `chat` its key. */
@@ -209,9 +240,10 @@
       const v = sessionStorage.getItem(SENT_KEY);
       sessionStorage.removeItem(SENT_KEY);
       const o = v ? JSON.parse(v) : null;
-      if (o && key && o.chat === key && o.counted && o.info && Date.now() - o.at >= 0 && Date.now() - o.at < STEP_LEFTOVER_MS) leftover = o.info;
+      if (o && key && o.chat === key && o.counted && o.info && Date.now() - o.at >= 0 && Date.now() - o.at < STEP_LEFTOVER_MS) leftover = formOf(o.info);
     } catch { /* no storage here */ }
     watchRequests(false);
+    observe(true);
     s.armedAt = Date.now();
     s.chat = key;
     s.navigated = false;
@@ -247,9 +279,12 @@
     const transitioning = () => !!(window.navigation && window.navigation.transition);
     const requested = () => s.next > sub.seq;
     const loading = () => s.navigated && !transitioning();
+    const armedAt = s.armedAt;
     const finish = (settled) => {
       const out = { success: true, settled, navigated: s.navigated, counted: sub.counted, submitted: sub.counted ? sub.info : null, waitedMs: Date.now() - started, page: settled === 'navigating' ? null : page() };
-      end();
+      // Only this step's own arm ends here: this loop runs on the page's timers, so after a dialog or in a throttled tab
+      // it can end after the service worker stopped waiting and the next step armed the page (its hold would go with it).
+      if (s.armedAt === armedAt) end();
       return out;
     };
     while (Date.now() < until) {

@@ -5,7 +5,7 @@ services have their own policy at <https://foxl.ai/privacy>; that distinction
 matters here: the extension hands page data to its configured Foxl server, and the
 desktop app decides what context to send to the model or connected service.
 
-Last updated: October 27, 2026.
+Last updated: November 5, 2026.
 
 ## The short version
 
@@ -31,7 +31,7 @@ about them is more useful than a reassuring summary:
 | Tab URLs and titles | So a task can move between sites and the agent knows where it is | The configured Foxl server |
 | Your side-panel messages and recent replies | To answer your request and follow-up questions | The configured Foxl server |
 | Actions the agent performs: clicks, typed text, navigation | They are the work itself | Performed in your browser |
-| After a click or key press that sent a form or loaded a page: the page's title, first heading and first 300 characters of text, and the form's address, its button's words and up to eight of its answers (the choices: boxes ticked, options, amounts, dates; its stable hidden fields such as a product id, never a per-load token; never a form with a password field) | So Foxl knows what the step did before it reads the page, and does not send the same form twice by mistake | The configured Foxl server |
+| After a click or key press that sent a form or loaded a page: the page's title, first heading and first 300 characters of text, and the form's address, its button's words and up to eight of its answers (its choices, such as boxes ticked, options, amounts and dates, or its words when it has no choices; its stable hidden fields such as a product id, never a per-load token; never a form with a password field, and never a sign-in step: a username, a current password or a one-time code) | So Foxl knows what the step did before it reads the page, and does not send the same form twice by mistake | The configured Foxl server, and that site's own session storage in that tab (below) |
 | Your settings: the server URL and appearance preference | So you do not re-enter them | `chrome.storage.local`, on your machine only |
 
 Page content can include whatever is on the page, and that may be personal:
@@ -78,7 +78,7 @@ it, and so the two cannot drift apart quietly.
 | Personal communications | No | Not extracted or singled out, for the same reason as personally identifiable information above. |
 | Location | No | Not collected. No geolocation API is used. |
 | Web history | No browsing-history collection | The extension reads the target tab's URL and title. Snapshot baselines temporarily hold the URL in memory; they are not a history database. Only if you allow download receipts on the options page (the optional `downloads` permission): a download that a tab Foxl is working in starts is reported to the configured Foxl server with its file name (never its folder), size, state and source address without its query, read from Chrome's own download list when Foxl asks. Your other downloads are never read. |
-| User activity | No | Your clicks, keystrokes and mouse movement are not recorded. The clicks and typing that do happen are the agent carrying out the instruction you gave it. A form you send yourself is never recorded or stopped: only a form sent during one of the agent's own clicks or key presses is described to the configured Foxl server. |
+| User activity | No | Your clicks, keystrokes and mouse movement are not recorded. The clicks and typing that do happen are the agent carrying out the instruction you gave it. Only a form sent while one of the agent's own clicks or key presses waits for its answer is described to the configured Foxl server; a form you send yourself at any other time is never recorded or stopped. |
 
 The three certifications the store requires, each true of this code:
 
@@ -99,6 +99,11 @@ clears the relevant baselines. They are never written to extension storage.
 
 Screenshots pass through the extension without being written to disk by it.
 Settings persist in `chrome.storage.local`; removing the extension deletes those.
+
+When one of the agent's clicks or key presses sends a form, its description (as above)
+and a short key for the Foxl chat are kept in that site's own session storage, in that
+tab, so the next step there can still report a form whose answer Foxl did not see. The
+next step in that tab on that site removes it, and closing the tab does too.
 
 The visible side-panel conversation stays in that panel's memory. Follow-up
 requests include up to 20 recent messages within a 32 KB text budget. New chat or

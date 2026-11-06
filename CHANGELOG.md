@@ -25,7 +25,13 @@ version pinned to the app's unified line; the split makes the two independent.
   a form with the same choices, a submit of it during Foxl's own step is stopped and
   reported, so Foxl looks for the first filing before it sends again. A different item (a
   product in a hidden field or on its button) is another form, and a payment the page
-  itself refused is never counted as sent. Your own clicks are never stopped.
+  itself refused is never counted as sent. Only a submit made while one of Foxl's own
+  clicks or key presses waits for its answer is looked at, so a form you send yourself at
+  any other time is never described or stopped.
+- A sign-in step is never described, like a form with a password field: a form whose
+  fields ask for a username, a current password or a one-time code (by their autocomplete
+  tokens) is left out of the report, so an address or a code typed there is not sent back,
+  and trying that step again is never held back.
 - The build announces `step-watch`.
 
 ## v0.11.0 - November 4, 2026
