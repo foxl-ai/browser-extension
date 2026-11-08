@@ -224,17 +224,33 @@
     return rect.width > 0 && rect.height > 0;
   }
 
-  /** The area an element draws: its own box, or for `display: contents` the boxes of what it contains, together. */
+  /*
+   * The area an element draws: its own box, or for `display: contents` the boxes of the children it shows, together
+   * (a text run by its line boxes, an element by what IT draws, a hidden one not at all). Child by child, never a Range
+   * over the whole subtree: a SvelteKit page sits in one `<div style="display: contents">`, so that wrapper held every
+   * text run of the page, and spreading 135,000 of them into Math.min threw "Maximum call stack size exceeded", which
+   * failed the whole visible read (Chromium 156 takes about 123,000 arguments).
+   */
   function drawnRect(element, style = window.getComputedStyle(element)) {
     if (style.display !== 'contents') return element.getBoundingClientRect();
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    const rects = [...range.getClientRects()].filter((r) => r.width > 0 && r.height > 0);
-    if (rects.length === 0) return { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 };
-    const top = Math.min(...rects.map((r) => r.top));
-    const bottom = Math.max(...rects.map((r) => r.bottom));
-    const left = Math.min(...rects.map((r) => r.left));
-    const right = Math.max(...rects.map((r) => r.right));
+    let top = Infinity, left = Infinity, bottom = -Infinity, right = -Infinity;
+    const add = (r) => {
+      if (!(r.width > 0 && r.height > 0)) return;
+      if (r.top < top) top = r.top;
+      if (r.left < left) left = r.left;
+      if (r.bottom > bottom) bottom = r.bottom;
+      if (r.right > right) right = r.right;
+    };
+    for (const child of element.childNodes) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        const range = document.createRange();
+        range.selectNodeContents(child);
+        for (const r of range.getClientRects()) add(r);
+      } else if (child.nodeType === Node.ELEMENT_NODE && isVisible(child)) {
+        add(drawnRect(child));
+      }
+    }
+    if (top === Infinity) return { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 };
     return { top, bottom, left, right, width: right - left, height: bottom - top };
   }
 
@@ -643,8 +659,13 @@
   window.__pilotElementInfo = function(refId) {
     const el = window.__pilotGetElement(refId);
     if (!el) return notFound(refId);
-    el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
-    const r = el.getBoundingClientRect();
+    // A `display: contents` element has no box of its own: its first shown child is scrolled into view, and the point
+    // is the middle of what it draws, as the read measures it (`drawnRect`). Every other element as before.
+    const style = window.getComputedStyle(el);
+    const contents = style.display === 'contents';
+    const anchor = contents ? [...el.children].find((child) => isVisible(child)) || el : el;
+    anchor.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+    const r = contents ? drawnRect(el, style) : el.getBoundingClientRect();
     if (r.width === 0 && r.height === 0) {
       return { success: false, error: `Element ${refId} takes no space on the page (it is hidden). Take a new snapshot.` };
     }

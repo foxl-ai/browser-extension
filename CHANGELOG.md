@@ -19,7 +19,9 @@ version pinned to the app's unified line; the split makes the two independent.
 
 - A button drawn as an SVG image, and a link styled so it draws no box of its own, are now
   read as shown. Before, Foxl's page read treated them as hidden and left them out of what it
-  saw on screen.
+  saw on screen. Everything else an SVG draws is read the same way, so a chart's labels and an
+  SVG logo are now part of what Foxl sees on screen too. A click on such a link aims at what it
+  draws.
 
 ## v0.12.0 - November 6, 2026
 
