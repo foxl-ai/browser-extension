@@ -6,6 +6,21 @@ This extension has its own version line, independent of the Foxl Desktop release
 number. It used to ship inside the Foxl monorepo, where a script kept its manifest
 version pinned to the app's unified line; the split makes the two independent.
 
+## v0.12.1 (unreleased)
+
+### Added
+
+- Foxl can sign you in to a site in your own Chrome with a sign-in you saved in Foxl. It types
+  the saved username, password or one-time code only into the tab's own page (never into an
+  embedded frame), and only while that page is on the site the sign-in was saved for. If the
+  page moves to another site, nothing more is typed. The extension keeps none of these values.
+
+### Fixed
+
+- A button drawn as an SVG image, and a link styled so it draws no box of its own, are now
+  read as shown. Before, Foxl's page read treated them as hidden and left them out of what it
+  saw on screen.
+
 ## v0.12.0 - November 6, 2026
 
 ### Fixed

@@ -81,7 +81,7 @@ const lineOf = (text, needle) => text.split('\n').find((line) => line.includes(n
 const refOf = (line) => /\[(ref_[^\]\s]+)\]/.exec(line)?.[1] ?? null;
 
 test('the build announces what it can do beyond its version', () => {
-  assert.deepEqual([...(ext.announced.capabilities ?? [])].sort(), ['downloads', 'read-marks', 'read-text', 'step-watch', 'tab-openers'],
+  assert.deepEqual([...(ext.announced.capabilities ?? [])].sort(), ['downloads', 'fill-sign-in', 'read-marks', 'read-text', 'step-watch', 'tab-openers'],
     `extension_connected: ${JSON.stringify(ext.announced)}`);
 });
 

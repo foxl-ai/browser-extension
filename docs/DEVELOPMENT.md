@@ -134,6 +134,16 @@ access. Run it with `--extension /absolute/path/to/this/checkout --headed`.
 The fixture proxy rejects other destinations, including installed Foxl discovery
 ports. The probe changes no installed extension or real desktop data.
 
+## A saved sign-in, and what counts as drawn (0.12.1)
+
+`capabilities` adds `"fill-sign-in"`. A desktop sends `fill_sign_in` only when it is announced; an older build answers "Unknown action".
+
+| Action | Parameters | Result |
+| :--- | :--- | :--- |
+| `fill_sign_in` | `expectedOrigin` (the https origin, or a loopback http one, the sign-in was saved for) and `fields: [{ refId, kind, value }]`, one to three, `kind` one of `username`, `password`, `code`, `refId` a top-document ref (`ref_N`) | `{ success: true, filled: [{ refId, kind }], origin }`, or `{ success: false, refused, error, filled }` with `refused` one of `origin`, `frame`, `field`. Nothing is typed into an embedded frame or into a tab whose page is on another origin: the tab's address is checked first, and the page checks that it is the top document and still on `expectedOrigin` right before each value. A field must be an input of its kind (a password into a password field). No answer and no error carries a value, and the extension keeps none. |
+
+`get_accessibility_tree` measures what an element draws: an HTML element by its layout box, an SVG element and a `display: contents` element by the boxes it draws. Before 0.12.1 a drawn `<svg role="button">` and an icon link made `display: contents` read as `hidden` and were left out of a `visible` read.
+
 ## Audit and build
 
 With Node.js 20 or newer:
