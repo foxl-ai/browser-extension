@@ -130,8 +130,9 @@ let focusedTabId = null; // The tab currently focused for agent operations
  * tab's downloads are reported (`downloads`), and tabs carry their opener (`tab-openers`).
  * 0.12.0 (foxl-ai/pilot #6394): a click or a key press waits for what it started and reports it,
  * and holds back a form the desktop's chat already sent (`step-watch`, step-watch.js).
+ * 0.12.1: a sign-in saved in Foxl Desktop is typed into the tab's own page (`fill-sign-in`, `fill_sign_in`).
  */
-const CAPABILITIES = ['read-marks', 'read-text', 'downloads', 'tab-openers', 'step-watch'];
+const CAPABILITIES = ['read-marks', 'read-text', 'downloads', 'tab-openers', 'step-watch', 'fill-sign-in'];
 
 /*
  * WHERE FOXL LAST ACTED: the last time Foxl clicked, typed, pressed a key, chose an option or
@@ -493,7 +494,7 @@ function broadcastTabContexts() {
  * (a confirm() dialog, a hung script) holds only its own queue, and only until the
  * action's deadline; an action that could not start in time is refused, not run late.
  */
-const INPUT_ACTIONS = new Set(['click', 'type', 'select', 'click_at', 'press_key', 'hover']);
+const INPUT_ACTIONS = new Set(['click', 'type', 'select', 'click_at', 'press_key', 'hover', 'fill_sign_in']);
 const inputQueue = createInputQueue();
 
 /**
@@ -543,6 +544,10 @@ async function executeBrowserCommand(command) {
 
       case 'type':
         return await typeInElement(targetTabId, params.refId, params.text, params.submit, deadline);
+
+      // Added in 0.12.1: a sign-in saved in Foxl Desktop, typed into the tab's top document on its own site only.
+      case 'fill_sign_in':
+        return await fillSignIn(targetTabId, params, deadline);
 
       // Added in 0.8.0: what a person does without an element ref (page events).
       case 'click_at':
@@ -971,6 +976,46 @@ async function hoverElement(tabId, refId, x, y, deadline) {
   }
   try {
     return await chrome.tabs.sendMessage(tabId, { type: 'HOVER_FALLBACK', refId, x, y, deadline });
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+/*
+ * A SAVED SIGN-IN (0.12.1). Foxl Desktop sends the username, password or one-time code it holds and the
+ * origin the sign-in was saved for. It goes to the tab's TOP frame only (frame 0), and the page checks that
+ * it is the top document and still on that origin right before each value (`__pilotFillSignIn`). Nothing here
+ * logs, stores or answers a value: the answer names the fields filled, and an error never quotes one.
+ * Its message carries the input queue's deadline like every other input action's, so a fill that reaches a page
+ * after it (a dialog, a hung script) is refused there, never typed after the desktop was told it failed.
+ */
+const SIGN_IN_KINDS = new Set(['username', 'password', 'code']);
+async function fillSignIn(tabId, params = {}, deadline) {
+  if (!tabId) return { success: false, error: 'fill_sign_in needs a tab' };
+  const expectedOrigin = typeof params.expectedOrigin === 'string' ? params.expectedOrigin : '';
+  let origin = '';
+  try { origin = new URL(expectedOrigin).origin; } catch { origin = ''; }
+  const loopback = /^http:\/\/(?:localhost|[a-z0-9-]+\.localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(origin);
+  if (!origin || origin !== expectedOrigin || !(origin.startsWith('https://') || loopback)) {
+    return { success: false, error: 'fill_sign_in needs the https origin the sign-in was saved for' };
+  }
+  const fields = Array.isArray(params.fields) ? params.fields : [];
+  if (fields.length === 0 || fields.length > 3) return { success: false, error: 'fill_sign_in takes one to three fields' };
+  for (const field of fields) {
+    const ref = typeof field?.refId === 'string' ? field.refId : '';
+    if (!/^ref_\d+$/.test(ref)) return { success: false, refused: 'frame', error: 'A saved sign-in is typed only into the page itself: a field ref of the top document (ref_N) is needed' };
+    if (!SIGN_IN_KINDS.has(field?.kind) || typeof field?.value !== 'string' || field.value.length === 0 || field.value.length > 512) {
+      return { success: false, error: `fill_sign_in: field ${ref} needs a kind (username, password or code) and a value` };
+    }
+  }
+  // A first look at where the tab is; the page's own check right before each value is the one that counts.
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  let tabOrigin = '';
+  try { tabOrigin = tab?.url ? new URL(tab.url).origin : ''; } catch { tabOrigin = ''; }
+  if (tabOrigin !== origin) return { success: false, refused: 'origin', error: `The tab is on ${tabOrigin || 'a page Foxl cannot read'}, not ${origin}, the site the sign-in was saved for. Nothing was typed.` };
+  try {
+    const result = await chrome.tabs.sendMessage(tabId, { type: 'FILL_SIGN_IN', expectedOrigin: origin, fields, deadline }, { frameId: 0 });
+    return result || { success: false, error: 'No answer from the page' };
   } catch (err) {
     return { success: false, error: err.message };
   }

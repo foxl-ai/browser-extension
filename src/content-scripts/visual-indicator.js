@@ -382,6 +382,19 @@
         break;
 
       /*
+       * A saved sign-in from Foxl Desktop (`fill_sign_in`). This script runs in the top document only
+       * (`all_frames: false`), and the service worker sends it to frame 0; the page-side function
+       * checks both again. The answer never carries a value.
+       */
+      case 'FILL_SIGN_IN':
+        try {
+          sendResponse(window.__pilotFillSignIn?.(message.expectedOrigin, message.fields) || { success: false, error: 'Function not available' });
+        } catch (err) {
+          sendResponse({ success: false, error: err.message });
+        }
+        break;
+
+      /*
        * The pieces the service worker composes into click / type / key / hover. Each
        * answers a plain object, including how it acted (`method`).
        */

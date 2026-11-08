@@ -22,6 +22,9 @@
   // Foxl's own overlay nodes, recorded by visual-indicator.js in THIS isolated world, where a
   // page cannot add to it (see there). The only test of "is this Foxl's UI".
   window.__foxlOwnNodes = window.__foxlOwnNodes || new WeakSet();
+  // The fields `fill_sign_in` typed a saved sign-in into, kept in THIS isolated world, where a page cannot reach it.
+  // step-watch.js reads it (since 0.12.0) so a form holding one is never described, and a read never names one by its value.
+  window.__foxlFilledFields = window.__foxlFilledFields || new WeakSet();
 
   /*
    * THE POP-UPS CHROME BLOCKED (#6245). A window.open that Chrome's pop-up blocker refuses returns
@@ -161,8 +164,9 @@
         return value.trim();
       }
       // element.type, not the attribute: type="PASSWORD" is a password too. A hidden
-      // field's value (a CSRF or session token) is not on screen, so it is never a name.
-      if (!['password', 'hidden'].includes(element.type) && element.value && element.value.length < 50 && element.value.trim()) {
+      // field's value (a CSRF or session token) is not on screen, so it is never a name,
+      // and neither is what a saved sign-in typed (a username, a one-time code).
+      if (!['password', 'hidden'].includes(element.type) && !window.__foxlFilledFields.has(element) && element.value && element.value.length < 50 && element.value.trim()) {
         return element.value.trim();
       }
     }
@@ -208,11 +212,46 @@
    */
   function isVisible(element) {
     const style = window.getComputedStyle(element);
-    return style.display !== 'none' &&
-           style.visibility !== 'hidden' &&
-           style.opacity !== '0' &&
-           element.offsetWidth > 0 &&
-           element.offsetHeight > 0;
+    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+    /*
+     * Measured by what the element DRAWS. An HTML element by its layout box, as before; an SVG element
+     * has no offsetWidth (undefined), and a `display: contents` element draws no box of its own (0), so
+     * a drawn <svg role="button"> or an icon link made `display: contents` read as hidden. Those two are
+     * measured by their drawn boxes instead (`drawnRect`).
+     */
+    if (element instanceof HTMLElement && style.display !== 'contents') return element.offsetWidth > 0 && element.offsetHeight > 0;
+    const rect = drawnRect(element, style);
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  /*
+   * The area an element draws: its own box, or for `display: contents` the boxes of the children it shows, together
+   * (a text run by its line boxes, an element by what IT draws, a hidden one not at all). Child by child, never a Range
+   * over the whole subtree: a SvelteKit page sits in one `<div style="display: contents">`, so that wrapper held every
+   * text run of the page, and spreading 135,000 of them into Math.min threw "Maximum call stack size exceeded", which
+   * failed the whole visible read (Chromium 156 takes about 123,000 arguments).
+   */
+  function drawnRect(element, style = window.getComputedStyle(element)) {
+    if (style.display !== 'contents') return element.getBoundingClientRect();
+    let top = Infinity, left = Infinity, bottom = -Infinity, right = -Infinity;
+    const add = (r) => {
+      if (!(r.width > 0 && r.height > 0)) return;
+      if (r.top < top) top = r.top;
+      if (r.left < left) left = r.left;
+      if (r.bottom > bottom) bottom = r.bottom;
+      if (r.right > right) right = r.right;
+    };
+    for (const child of element.childNodes) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        const range = document.createRange();
+        range.selectNodeContents(child);
+        for (const r of range.getClientRects()) add(r);
+      } else if (child.nodeType === Node.ELEMENT_NODE && isVisible(child)) {
+        add(drawnRect(child));
+      }
+    }
+    if (top === Infinity) return { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 };
+    return { top, bottom, left, right, width: right - left, height: bottom - top };
   }
 
   /*
@@ -297,7 +336,7 @@
 
     // Check viewport visibility (unless targeting specific ref)
     if (options.filter !== 'all' && !options.refId) {
-      const rect = element.getBoundingClientRect();
+      const rect = drawnRect(element);
       if (!(rect.top < window.innerHeight && rect.bottom > 0 &&
             rect.left < window.innerWidth && rect.right > 0)) {
         return false;
@@ -620,8 +659,13 @@
   window.__pilotElementInfo = function(refId) {
     const el = window.__pilotGetElement(refId);
     if (!el) return notFound(refId);
-    el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
-    const r = el.getBoundingClientRect();
+    // A `display: contents` element has no box of its own: its first shown child is scrolled into view, and the point
+    // is the middle of what it draws, as the read measures it (`drawnRect`). Every other element as before.
+    const style = window.getComputedStyle(el);
+    const contents = style.display === 'contents';
+    const anchor = contents ? [...el.children].find((child) => isVisible(child)) || el : el;
+    anchor.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+    const r = contents ? drawnRect(el, style) : el.getBoundingClientRect();
     if (r.width === 0 && r.height === 0) {
       return { success: false, error: `Element ${refId} takes no space on the page (it is hidden). Take a new snapshot.` };
     }
@@ -717,6 +761,50 @@
     const want = alnum(text);
     return want.length > 0 && alnum(value).includes(want);
   }
+
+  /*
+   * A SAVED SIGN-IN, TYPED INTO THIS PAGE (`fill_sign_in`, Foxl Desktop sends the values from its own vault).
+   * It types only into this tab's TOP document, and only while the page is on `expectedOrigin`, the site the
+   * sign-in was saved for: both are checked right before EACH value, so a page that moved to another site
+   * between two fields gets nothing more. Each field must be a text-like input of its kind (a password into
+   * a password field). The answer names the fields filled and, for a refusal, why; it never carries a value,
+   * and nothing here keeps one.
+   */
+  /** The input types (`el.type`, which reads a missing or unknown type as "text") each kind may go into. */
+  const SIGN_IN_FIELD_TYPES = {
+    username: new Set(['text', 'email', 'tel']),
+    password: new Set(['password']),
+    code: new Set(['text', 'tel', 'number', 'password']),
+  };
+  window.__pilotFillSignIn = function(expectedOrigin, fields) {
+    if (window.top !== window) return { success: false, refused: 'frame', error: 'A saved sign-in is typed only into the page itself, never into an embedded frame.' };
+    if (!Array.isArray(fields) || fields.length === 0) return { success: false, error: 'No field to fill.' };
+    const filled = [];
+    for (const field of fields) {
+      // The address AND the document's own origin: a sandboxed document at the site's address has an opaque one.
+      if (location.origin !== expectedOrigin || window.origin !== expectedOrigin) {
+        return { success: false, refused: 'origin', filled, error: `This page is on ${window.origin === location.origin ? location.origin : `${location.origin} with an origin of its own (${window.origin})`}, not ${expectedOrigin}, the site the sign-in was saved for. Nothing more was typed.` };
+      }
+      const kind = field && typeof field.kind === 'string' ? field.kind : '';
+      const types = SIGN_IN_FIELD_TYPES[kind];
+      if (!types) return { success: false, filled, error: `Unknown field kind ${JSON.stringify(kind)}.` };
+      const el = window.__pilotGetElement(field.refId);
+      if (!el) return { ...notFound(field.refId), filled };
+      if (!(el instanceof HTMLInputElement) || el.ownerDocument !== document || !types.has(el.type)) {
+        return { success: false, refused: 'field', filled, error: `${field.refId} (${describe(el)}) is not a ${kind} field.` };
+      }
+      if (el.disabled || el.readOnly) return { success: false, refused: 'field', filled, error: `${field.refId} cannot be typed into.` };
+      // Marked BEFORE typing, so a field that took part of the value is marked too: the step watch never describes
+      // its form (a username-only or code-only step sent with Enter or a click), and a read never names it by its value.
+      window.__foxlFilledFields.add(el);
+      const typed = window.__pilotInsertTextFallback(field.refId, String(field.value ?? ''));
+      // The value is read back without being returned: a field that rewrote or dropped it is a failure.
+      const ok = typed.success && (kind === 'password' ? el.value.length >= String(field.value ?? '').length : holdsText(el.value, String(field.value ?? '')));
+      if (!ok) return { success: false, filled, error: `${field.refId} did not take the ${kind}.` };
+      filled.push({ refId: field.refId, kind });
+    }
+    return { success: true, filled, origin: location.origin };
+  };
 
   function mouseSequence(target, x, y) {
     const base = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, view: window, button: 0 };
