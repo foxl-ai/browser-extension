@@ -117,9 +117,11 @@ re-verified rather than remembered. Every unused permission has been REMOVED -
 - Personally identifiable information: **no**
 - Health information: **no**
 - Financial and payment information: **no**
-- Authentication information: no separate collection; password and hidden field
-  values are omitted from snapshots. Sensitive content can still appear in website content
-  or screenshots; see PRIVACY.md.
+- Authentication information: **yes** (since 0.12.1): a sign-in the person saved in Foxl
+  Desktop is received from their own Foxl server and typed into that site's own page; it is
+  never stored or sent elsewhere. Password and hidden field values, and fields a saved
+  sign-in filled, are omitted from snapshots. Sensitive content can still appear in website
+  content or screenshots; see PRIVACY.md.
 - Personal communications: **no**
 - Location: **no**
 - Web history: **no browsing-history collection**; snapshot baselines temporarily
