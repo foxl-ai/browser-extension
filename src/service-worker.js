@@ -547,7 +547,7 @@ async function executeBrowserCommand(command) {
 
       // Added in 0.12.1: a sign-in saved in Foxl Desktop, typed into the tab's top document on its own site only.
       case 'fill_sign_in':
-        return await fillSignIn(targetTabId, params);
+        return await fillSignIn(targetTabId, params, deadline);
 
       // Added in 0.8.0: what a person does without an element ref (page events).
       case 'click_at':
@@ -981,17 +981,16 @@ async function hoverElement(tabId, refId, x, y, deadline) {
   }
 }
 
-/**
- * Select option in dropdown
- */
 /*
  * A SAVED SIGN-IN (0.12.1). Foxl Desktop sends the username, password or one-time code it holds and the
  * origin the sign-in was saved for. It goes to the tab's TOP frame only (frame 0), and the page checks that
  * it is the top document and still on that origin right before each value (`__pilotFillSignIn`). Nothing here
  * logs, stores or answers a value: the answer names the fields filled, and an error never quotes one.
+ * Its message carries the input queue's deadline like every other input action's, so a fill that reaches a page
+ * after it (a dialog, a hung script) is refused there, never typed after the desktop was told it failed.
  */
 const SIGN_IN_KINDS = new Set(['username', 'password', 'code']);
-async function fillSignIn(tabId, params = {}) {
+async function fillSignIn(tabId, params = {}, deadline) {
   if (!tabId) return { success: false, error: 'fill_sign_in needs a tab' };
   const expectedOrigin = typeof params.expectedOrigin === 'string' ? params.expectedOrigin : '';
   let origin = '';
@@ -1015,13 +1014,16 @@ async function fillSignIn(tabId, params = {}) {
   try { tabOrigin = tab?.url ? new URL(tab.url).origin : ''; } catch { tabOrigin = ''; }
   if (tabOrigin !== origin) return { success: false, refused: 'origin', error: `The tab is on ${tabOrigin || 'a page Foxl cannot read'}, not ${origin}, the site the sign-in was saved for. Nothing was typed.` };
   try {
-    const result = await chrome.tabs.sendMessage(tabId, { type: 'FILL_SIGN_IN', expectedOrigin: origin, fields }, { frameId: 0 });
+    const result = await chrome.tabs.sendMessage(tabId, { type: 'FILL_SIGN_IN', expectedOrigin: origin, fields, deadline }, { frameId: 0 });
     return result || { success: false, error: 'No answer from the page' };
   } catch (err) {
     return { success: false, error: err.message };
   }
 }
 
+/**
+ * Select option in dropdown
+ */
 async function selectOption(tabId, refId, value, deadline) {
   if (!tabId || !refId) {
     return { success: false, error: 'Tab ID and ref ID required' };
