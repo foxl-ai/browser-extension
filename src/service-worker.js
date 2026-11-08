@@ -996,7 +996,7 @@ async function fillSignIn(tabId, params = {}) {
   const expectedOrigin = typeof params.expectedOrigin === 'string' ? params.expectedOrigin : '';
   let origin = '';
   try { origin = new URL(expectedOrigin).origin; } catch { origin = ''; }
-  const loopback = /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(origin);
+  const loopback = /^http:\/\/(?:localhost|[a-z0-9-]+\.localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(origin);
   if (!origin || origin !== expectedOrigin || !(origin.startsWith('https://') || loopback)) {
     return { success: false, error: 'fill_sign_in needs the https origin the sign-in was saved for' };
   }
