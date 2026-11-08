@@ -10,9 +10,9 @@
  *
  * Since foxl-ai/pilot #6550 the text also says what is never described: a sign-in step, a form that sends a username,
  * a current password or a one-time code by its fields' autocomplete tokens, whoever typed it (the person, or Chrome's
- * password manager); and a form holding what a saved sign-in typed (the desktop's `fill_login` mark; this extension
- * types no saved sign-in in 0.12, so its `__foxlFilledFields` is never set). scripts/browser/step-watch-guards.test.mjs
- * runs it in a real page.
+ * password manager); and a form holding what a saved sign-in typed (the desktop's `fill_login` mark; this extension's
+ * `fill_sign_in`, since 0.12.1, keeps each field it types into in `__foxlFilledFields`, accessibility-tree.js).
+ * scripts/browser/step-watch-guards.test.mjs and scripts/browser/fill-sign-in-marks.test.mjs run it in a real page.
  *
  * Run: node --test scripts/step-watch-describe.test.mjs   (zero dependencies, like the other scripts)
  */

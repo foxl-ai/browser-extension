@@ -22,6 +22,9 @@
   // Foxl's own overlay nodes, recorded by visual-indicator.js in THIS isolated world, where a
   // page cannot add to it (see there). The only test of "is this Foxl's UI".
   window.__foxlOwnNodes = window.__foxlOwnNodes || new WeakSet();
+  // The fields `fill_sign_in` typed a saved sign-in into, kept in THIS isolated world, where a page cannot reach it.
+  // step-watch.js reads it (since 0.12.0) so a form holding one is never described, and a read never names one by its value.
+  window.__foxlFilledFields = window.__foxlFilledFields || new WeakSet();
 
   /*
    * THE POP-UPS CHROME BLOCKED (#6245). A window.open that Chrome's pop-up blocker refuses returns
@@ -161,8 +164,9 @@
         return value.trim();
       }
       // element.type, not the attribute: type="PASSWORD" is a password too. A hidden
-      // field's value (a CSRF or session token) is not on screen, so it is never a name.
-      if (!['password', 'hidden'].includes(element.type) && element.value && element.value.length < 50 && element.value.trim()) {
+      // field's value (a CSRF or session token) is not on screen, so it is never a name,
+      // and neither is what a saved sign-in typed (a username, a one-time code).
+      if (!['password', 'hidden'].includes(element.type) && !window.__foxlFilledFields.has(element) && element.value && element.value.length < 50 && element.value.trim()) {
         return element.value.trim();
       }
     }
@@ -769,6 +773,9 @@
         return { success: false, refused: 'field', filled, error: `${field.refId} (${describe(el)}) is not a ${kind} field.` };
       }
       if (el.disabled || el.readOnly) return { success: false, refused: 'field', filled, error: `${field.refId} cannot be typed into.` };
+      // Marked BEFORE typing, so a field that took part of the value is marked too: the step watch never describes
+      // its form (a username-only or code-only step sent with Enter or a click), and a read never names it by its value.
+      window.__foxlFilledFields.add(el);
       const typed = window.__pilotInsertTextFallback(field.refId, String(field.value ?? ''));
       // The value is read back without being returned: a field that rewrote or dropped it is a failure.
       const ok = typed.success && (kind === 'password' ? el.value.length >= String(field.value ?? '').length : holdsText(el.value, String(field.value ?? '')));
