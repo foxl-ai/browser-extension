@@ -1,0 +1,34 @@
+name: Chrome Web Store status
+
+# READ-ONLY: asks the store, as the publisher's service account, what it holds for the item
+# (published and submitted versions, review state, the last upload). Changes nothing. Run it to
+# prove the store credentials work, and after a release to see where its review stands:
+#   gh workflow run cws-status.yml --repo foxl-ai/browser-extension
+# scripts/cws-publish.mjs carries the wire constants and their sources.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    environment: chrome-web-store
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Ask the store
+        env:
+          CWS_SERVICE_ACCOUNT_JSON: ${{ secrets.CWS_SERVICE_ACCOUNT_JSON }}
+          CWS_PUBLISHER_ID: ${{ vars.CWS_PUBLISHER_ID }}
+          CWS_EXTENSION_ID: ${{ vars.CWS_EXTENSION_ID }}
+        run: |
+          set -euo pipefail
+          { echo "### Chrome Web Store: ${CWS_EXTENSION_ID}"; echo ""; } >> "$GITHUB_STEP_SUMMARY"
+          node scripts/cws-publish.mjs status | tee -a "$GITHUB_STEP_SUMMARY"
