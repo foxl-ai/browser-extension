@@ -144,6 +144,10 @@ ports. The probe changes no installed extension or real desktop data.
 
 `get_accessibility_tree` measures what an element draws: an HTML element by its layout box, an SVG element by its own box, and a `display: contents` element by the boxes of the children it shows (a hidden child adds nothing); a click or hover on a ref aims at the same box. Before 0.12.1 a drawn `<svg role="button">` and an icon link made `display: contents` read as `hidden` and were left out of a `visible` read; every other drawn SVG element (a chart's labels, an SVG logo) is in a `visible` read since 0.12.1 too.
 
+## What a saved sign-in typed, in later reads (0.12.2)
+
+A field `fill_sign_in` typed into reads `value="filled-by-foxl"` in `get_accessibility_tree` (every filter, snapshots and their diffs), and `read_text` of it answers `text: "filled-by-foxl"` with a `note`; neither carries the value or its length. 0.12.1 withheld only its name (an unlabeled field is named by its value), and the line still carried `value="<what was typed>"`. The mark is the element (`__foxlFilledFields`), so it holds when a single-page app changes its path with `history.pushState` (foxl-ai/pilot #6966). There is no new capability: Foxl Desktop keeps masking the filled refs on its own side (`maskChromeFilled`, the same word) for the builds before 0.12.2.
+
 ## Audit and build
 
 With Node.js 20 or newer:

@@ -10,8 +10,12 @@
  *      records and quotes back in NOT_SENT_AGAIN; and the same step again in that chat was HELD as a second filing;
  *   2. a later read of an unlabeled field named it by what the fill typed (`textbox "<the username>"`), outside the
  *      `value="..."` that the desktop masks on the filled refs.
+ * And since 0.12.2 (foxl-ai/pilot #6966) the value itself: 0.12.1 still printed `value="<the username>"` on a filled
+ * field, which the desktop hides by ref only on the page (origin and path) the fill typed on. A single-page app that
+ * moves to another path with `history.pushState` keeps the document, the refs and the field, so the desktop's first
+ * read of the new path dropped its note and showed the value (3). A filled field now reads `value="filled-by-foxl"`.
  * The real extension in Chromium (scripts/browser/harness.mjs), a fictional local bank. Run: npm run test:browser.
- * Red on d16a9a0 (the mark is missing).
+ * Red on d16a9a0 (the mark is missing); 3 is red on 0.12.1 (FOXL_EXTENSION_DIR=<0.12.1's tree>: the value is printed).
  */
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
@@ -20,6 +24,7 @@ import { launchExtension } from './harness.mjs';
 const USER = 'fixture-user-2b7c';
 const PASS = 'Fixture-Pass-5e1d-kv';
 const CODE = '604917';
+const MEMO = 'memo-fixture-3c8e';
 const html = (res, body) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(body); };
 const posts = { user: 0, code: 0 };
 
@@ -35,6 +40,12 @@ before(async () => {
       '/code-step/verify': (req, res) => { req.resume(); posts.code += 1; setTimeout(() => html(res, '<!doctype html><title>Verified</title><h1>Verified</h1>'), 200); },
       '/unlabeled': (req, res) => html(res, `<!doctype html><title>Sign in</title><h1>Sign in</h1><form method="post" action="/x" onsubmit="return false">
 <div>User ID <input name="user" type="text"></div><div>Password <input name="pass" type="password"></div><button type="submit">Sign in</button></form>`),
+      // A single-page app's sign-in: the test moves it to its next view with history.pushState, as the app's own Next would.
+      '/spa/sign-in': (req, res) => html(res, `<!doctype html><title>Sign in</title><h1>Sign in to Example Bank</h1>
+<label for="u">User ID</label><input id="u" name="userid" type="text" autocomplete="off">
+<label for="c">Code</label><input id="c" name="otp" type="text" inputmode="numeric">
+<label for="m">Memo</label><input id="m" name="memo" type="text" value="${MEMO}">
+<button type="button">Next</button>`),
     },
   });
 }, { timeout: 60_000 });
@@ -104,9 +115,57 @@ test('2. a later read never names a filled field by what the fill typed', async 
   for (const filter of ['all', 'visible', 'interactive']) {
     const text = (await ext.command('get_accessibility_tree', tabId, { filter })).data.pageContent;
     assert.ok(!text.includes(PASS), `no password in the ${filter} read`);
-    // The field's value stays in `value="..."`, which the desktop shows as filled-by-foxl on the filled refs.
+    // The name only; the value itself is test 3's.
     const outsideValues = text.replace(/\bvalue="(?:[^"\\]|\\.)*"/g, 'value=""');
     assert.ok(!outsideValues.includes(USER), `the ${filter} read names no field by the username: ${text.split('\n').find((l) => l.includes(`[${user}]`))}`);
   }
+  await page.close();
+});
+
+test('3. after a single-page app moves to another path (history.pushState), no read shows what the fill typed (#6966)', async () => {
+  const page = await ext.context.newPage();
+  await page.goto(`${ext.origin}/spa/sign-in`);
+  const tabId = await ext.tabIdOf(page);
+  const lines = (await ext.command('get_accessibility_tree', tabId, { filter: 'all' })).data.pageContent.split('\n');
+  const user = refOf(lines.find((l) => /^\s*textbox "User ID"/.test(l)));
+  const code = refOf(lines.find((l) => /^\s*textbox "Code"/.test(l)));
+  const memo = refOf(lines.find((l) => /^\s*textbox "Memo"/.test(l)));
+  assert.ok(user && code && memo, `the three fields are read: ${lines.join('\n')}`);
+  const fill = await ext.command('fill_sign_in', tabId, { expectedOrigin: ext.origin, fields: [{ refId: user, kind: 'username', value: USER }, { refId: code, kind: 'code', value: CODE }] });
+  assert.equal(fill.success, true, JSON.stringify(fill));
+
+  // The same document on another path: the refs and the fields stay, holding what was typed.
+  await page.evaluate(() => history.pushState({}, '', '/spa/verify'));
+  assert.equal(new URL(page.url()).pathname, '/spa/verify');
+  assert.deepEqual(await page.evaluate(() => ['u', 'c'].map((id) => document.getElementById(id).value)), [USER, CODE], 'the page still holds both');
+
+  const reads = {};
+  for (const filter of ['all', 'visible', 'interactive']) {
+    const tree = await ext.command('get_accessibility_tree', tabId, { filter });
+    assert.equal(tree.success, true, JSON.stringify(tree));
+    reads[filter] = tree.data.pageContent;
+  }
+  // The desktop's own read (a snapshot), which names the new path: there Foxl Desktop's per-page note is dropped.
+  const snapshot = await ext.command('get_accessibility_tree', tabId, { snapshot: true });
+  assert.equal(snapshot.success, true, JSON.stringify(snapshot));
+  assert.equal(new URL(snapshot.url).pathname, '/spa/verify', 'the snapshot names the new path');
+  reads.snapshot = snapshot.pageContent;
+
+  const lineFor = (text, ref) => text.split('\n').find((l) => l.includes(`[${ref}]`)) ?? '';
+  for (const [read, text] of Object.entries(reads)) {
+    assert.ok(!text.includes(USER), `the ${read} read carries no username: ${lineFor(text, user)}`);
+    assert.ok(!text.includes(CODE), `the ${read} read carries no code: ${lineFor(text, code)}`);
+    for (const ref of [user, code]) assert.match(lineFor(text, ref), / value="filled-by-foxl"/, `the ${read} read shows ${ref} as filled-by-foxl`);
+    assert.match(lineFor(text, memo), new RegExp(` value="${MEMO}"`), `an unfilled field still shows its value in the ${read} read`);
+  }
+
+  // read_text by ref: the filled fields answer the same word, an unfilled one its value.
+  for (const ref of [user, code]) {
+    const read = await ext.command('read_text', tabId, { refId: ref });
+    assert.equal(read.success, true, JSON.stringify(read));
+    assert.equal(read.text, 'filled-by-foxl', `read_text of ${ref}: ${JSON.stringify(read)}`);
+    assert.ok(!JSON.stringify(read).includes(USER) && !JSON.stringify(read).includes(CODE), `read_text of ${ref} carries no value`);
+  }
+  assert.equal((await ext.command('read_text', tabId, { refId: memo })).text, MEMO, 'read_text of an unfilled field is its value');
   await page.close();
 });

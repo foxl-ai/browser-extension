@@ -172,7 +172,7 @@ The manifest requests access to all sites so the agent can work on the pages you
 | `alarms` | Maintain the service worker's connection lifecycle. |
 | `downloads` (optional) | Only after you choose **Allow** under **Download receipts** on the options page: see the downloads a Foxl task tab starts (file name, size, state) so Foxl can confirm a file was really saved. Your other downloads are never read. |
 
-Versions 0.11.0 through 0.12.1 request the same permissions as 0.9.0, and the update installs
+Versions 0.11.0 through 0.12.2 request the same permissions as 0.9.0, and the update installs
 without a prompt. The one permission 0.11.0 added, `downloads`, is optional: Chrome asks for it ("Manage your
 downloads") only when you choose **Allow** under **Download receipts** on the options page,
 and **Turn off** there takes it back. If you are upgrading from 0.8.x or earlier, Chrome
