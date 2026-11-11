@@ -6,6 +6,16 @@ This extension has its own version line, independent of the Foxl Desktop release
 number. It used to ship inside the Foxl monorepo, where a script kept its manifest
 version pinned to the app's unified line; the split makes the two independent.
 
+## v0.12.2 (unreleased)
+
+### Fixed
+
+- A username or one-time code Foxl typed from a sign-in you saved is no longer part of what Foxl
+  reads from the page afterwards. Until now the page read still showed it as the field's value,
+  and Foxl Desktop hid it only while the page kept its address, so a site that moves to its next
+  step without loading a new page could show it again. The field now reads `filled-by-foxl` in
+  every page read, and when Foxl reads that field's text.
+
 ## v0.12.1 - November 8, 2026
 
 ### Added

@@ -278,6 +278,19 @@
   const quoted = (value) => String(value).replace(/"/g, '\\"');
 
   /*
+   * WHAT A SAVED SIGN-IN TYPED IS NEVER READ BACK (0.12.2, foxl-ai/pilot #6966). A field in `__foxlFilledFields`
+   * shows this word as its value, in every read (tree lines under every filter, snapshots and their diffs, and
+   * `read_text`), instead of the username or one-time code it holds. Until 0.12.2 only its name was withheld and
+   * `value="..."` still carried what was typed: Foxl Desktop hid it on its own side, by ref and by the page's origin
+   * and path, so a single-page app that changed its path with `history.pushState` (same document, same refs) showed
+   * it again on the next read. The set holds elements, so this needs no page key and survives any path change.
+   * The word is Foxl Desktop's own mask (foxl-ai/pilot foxl/server/tools/filled-field-mask.ts `FILLED_BY_FOXL`,
+   * which login-fill-chrome.ts `maskChromeFilled` writes into this extension's lines): change both together.
+   */
+  const FILLED_BY_FOXL = 'filled-by-foxl';
+  const filledBySignIn = (element) => window.__foxlFilledFields.has(element);
+
+  /*
    * NOT SHOWN, under filter "all" (#6245): that filter lists hidden elements too, and until 0.11.0
    * marked nothing, so a hidden error template read like the page's state. `hidden` is an element
    * not drawn (display, visibility, opacity, no size); `aria-hidden` is one drawn but hidden from
@@ -413,11 +426,16 @@
       }
       if ((element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
         && !['password', 'hidden', 'checkbox', 'radio', 'file', 'submit', 'button'].includes(element.type)) {
-        const value = clipText(element.value, VALUE_CHARS);
-        line += ` value="${quoted(value.shown)}"`;
-        if (value.clipped) {
-          marks.push(`clipped_value=${VALUE_CHARS}/${value.total}`);
-          options.clipped.push({ ref: refId, field: 'value', chars: VALUE_CHARS, totalChars: value.total });
+        if (filledBySignIn(element)) {
+          // What a saved sign-in typed (FILLED_BY_FOXL above): never its value, nor its length.
+          line += ` value="${FILLED_BY_FOXL}"`;
+        } else {
+          const value = clipText(element.value, VALUE_CHARS);
+          line += ` value="${quoted(value.shown)}"`;
+          if (value.clipped) {
+            marks.push(`clipped_value=${VALUE_CHARS}/${value.total}`);
+            options.clipped.push({ ref: refId, field: 'value', chars: VALUE_CHARS, totalChars: value.total });
+          }
         }
       }
       if (element instanceof HTMLInputElement && ['checkbox', 'radio'].includes(element.type)) {
@@ -565,7 +583,8 @@
    * ONE ELEMENT'S WHOLE TEXT, A SLICE AT A TIME (#6245), so a long text the tree line cut (a
    * page's JSON answer, a statement table) is read by ref instead of by screenshots. Read-only,
    * this frame's element, at most READ_TEXT_MAX characters a call from `offset`; a field's value
-   * for an input or textarea (never a password or hidden field's), the text content otherwise,
+   * for an input or textarea (never a password or hidden field's, and `filled-by-foxl` for one a
+   * saved sign-in typed into), the text content otherwise,
    * exactly as the page holds it (whitespace kept). `hidden` says when the element is not shown.
    */
   const READ_TEXT_MAX = 20000;
@@ -575,6 +594,21 @@
     const field = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement;
     if (field && ['password', 'hidden'].includes(element.type)) {
       return { success: false, error: `${refId} is a ${element.type} field: its value is not read.` };
+    }
+    // What a saved sign-in typed is never read back (FILLED_BY_FOXL above), as Foxl Desktop answers on its own side
+    // (foxl-ai/pilot foxl/server/tools/registry.ts `read_text`), whose note this is.
+    if (field && filledBySignIn(element)) {
+      return {
+        success: true,
+        refId,
+        text: FILLED_BY_FOXL,
+        offset: 0,
+        returnedChars: FILLED_BY_FOXL.length,
+        totalChars: FILLED_BY_FOXL.length,
+        nextOffset: null,
+        hidden: hiddenReason(element),
+        note: 'This field holds what a saved sign-in typed; its value is never shown.',
+      };
     }
     const full = field ? element.value : (element.textContent || '');
     const start = Math.min(full.length, Math.max(0, Math.floor(Number(offset) || 0)));
