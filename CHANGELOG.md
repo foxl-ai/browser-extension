@@ -8,6 +8,13 @@ version pinned to the app's unified line; the split makes the two independent.
 
 ## v0.12.2 (unreleased)
 
+### Added
+
+- On a compatible desktop and Chrome 125 or newer, Foxl's internal browser can use
+  the same Chrome profile and task tabs as the extension, including the live take-over
+  screen. This expands debugger use to tab commands and observations; README and
+  PRIVACY describe the data and attachment lifetime.
+
 ### Fixed
 
 - A username or one-time code Foxl typed from a sign-in you saved is no longer part of what Foxl

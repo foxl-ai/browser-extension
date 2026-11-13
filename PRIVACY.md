@@ -5,7 +5,7 @@ services have their own policy at <https://foxl.ai/privacy>; that distinction
 matters here: the extension hands page data to its configured Foxl server, and the
 desktop app decides what context to send to the model or connected service.
 
-Last updated: November 5, 2026.
+Last updated: November 13, 2026.
 
 ## The short version
 
@@ -34,6 +34,8 @@ about them is more useful than a reassuring summary:
 | After a click or key press that sent a form or loaded a page: the page's title, first heading and first 300 characters of text, and the form's address, its button's words and up to eight of its answers (its choices, such as boxes ticked, options, amounts and dates, or its words when it has no choices; its stable hidden fields such as a product id, never a per-load token; never a form with a password field, and never a sign-in step: a username, a current password or a one-time code) | So Foxl knows what the step did before it reads the page, and does not send the same form twice by mistake | The configured Foxl server, and that site's own session storage in that tab (below) |
 | A sign-in you saved in Foxl Desktop (its username, password or one-time code), only when Foxl signs you in to that site in your own Chrome (0.12.1) | So a task can sign in to the site you asked about without you typing it again | Received from the configured Foxl server and typed into that site's own page, in the tab's top document only and only while the page is on the site the sign-in was saved for. It is never stored by the extension, never sent anywhere else, and no answer to the server carries it |
 | Your settings: the server URL and appearance preference | So you do not re-enter them | `chrome.storage.local`, on your machine only |
+| Shared Chrome tab data: requested page evaluations, network events and current-page cookies, plus live screen frames | So Foxl's internal browser can operate the same signed-in Chrome tab and show it in the take-over screen | A capability-protected loopback connection to Foxl Desktop; the desktop controls what becomes task context |
+| A random identifier for the current Chrome session | So reconnecting cannot silently select a different Chrome profile | `chrome.storage.session` for the browser lifetime, and the configured server's connection handshake; it is not a login credential |
 
 Page content can include whatever is on the page, and that may be personal:
 an email in a webmail tab, an order in a shop, a form you have partly filled in.
@@ -43,13 +45,16 @@ can include content outside the current viewport. Snapshots include what you hav
 typed into text fields. Password and hidden field values are omitted from text
 snapshots, but this does not redact sensitive text or pixels elsewhere on a page.
 
-The `debugger` permission added in 0.9 has broad browser capabilities. This code
-uses it only for `Page.getLayoutMetrics` and `Page.captureScreenshot` on a tab in
-the background; it does not request arbitrary CDP commands from the desktop, read
-cookies, or record network traffic. Chrome shows a "started debugging this
-browser" bar while it is attached. A real scripting call checks Chrome's current site access
-before attachment and before returning the image. The debugger is detached
-after capture, including on failure.
+The `debugger` permission added in 0.9 has broad browser capabilities. Ordinary
+background screenshots attach briefly. Shared Chrome keeps an attachment while
+Foxl's internal browser uses a registered task tab, forwarding tab CDP commands
+and events, including page evaluations, input, screenshots, streaming and requested
+network observations. These can contain sensitive page data or authentication headers.
+Reading cookies is limited to the current tab's address; profile-wide cookie export,
+cookie replacement and the Storage domain are refused. The browser profile is not copied.
+A real scripting call checks site access before attachment, tab commands and streamed
+frames. Chrome shows its debugging bar while attached. Disconnect detaches clients;
+it does not close the person's Chrome or their existing tabs.
 
 ## What the extension does not do
 
@@ -75,7 +80,7 @@ it, and so the two cannot drift apart quietly.
 | Personally identifiable information | No | Nothing of the kind is extracted, singled out or detected. Page content is passed through as page content; if a name or an address happens to be on the page, it is on the page. |
 | Health information | No | Not collected. |
 | Financial and payment information | No | Not collected. |
-| Authentication information | **Yes, used, not collected** | A sign-in you saved in Foxl Desktop (username, password or one-time code) is received from the configured Foxl server and typed into that site's own page when Foxl signs you in there; the extension stores none of it and sends it nowhere else. Password and hidden field values, and the fields a saved sign-in filled, are omitted from text snapshots. The code calls no cookie or token API. Sensitive information can still be present in website content or screenshots. |
+| Authentication information | **Yes** | Saved sign-ins are received from Foxl Desktop and typed into the site's page without extension storage. Shared Chrome can return current-page cookies and requested network observations, which may contain authentication headers, to the desktop. It refuses profile-wide export and cookie replacement. Ordinary extension text snapshots omit password, hidden and saved-sign-in field values; debugger results and pixels can still contain sensitive information. |
 | Personal communications | No | Not extracted or singled out, for the same reason as personally identifiable information above. |
 | Location | No | Not collected. No geolocation API is used. |
 | Web history | No browsing-history collection | The extension reads the target tab's URL and title. Snapshot baselines temporarily hold the URL in memory; they are not a history database. Only if you allow download receipts on the options page (the optional `downloads` permission): a download that a tab Foxl is working in starts is reported to the configured Foxl server with its file name (never its folder), size, state and source address without its query, read from Chrome's own download list when Foxl asks. Your other downloads are never read. |
@@ -100,6 +105,9 @@ clears the relevant baselines. They are never written to extension storage.
 
 Screenshots pass through the extension without being written to disk by it.
 Settings persist in `chrome.storage.local`; removing the extension deletes those.
+Shared Chrome frames and debugger messages also pass through without extension disk
+storage. Its random session identifier lasts in `chrome.storage.session` until Chrome
+ends that session.
 
 When one of the agent's clicks or key presses sends a form, its description (as above)
 and a short key for the Foxl chat are kept in that site's own session storage, in that

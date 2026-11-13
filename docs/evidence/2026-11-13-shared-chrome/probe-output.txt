@@ -1,0 +1,5 @@
+[PASS] The internal browser reads the HttpOnly login cookie and localStorage of the already running Chrome profile
+[PASS] The real extension tool edits the same live tab that the internal browser reads
+[PASS] Real CDP clients stay separate; page origins, unregistered tabs, profile export and closing existing Chrome tabs are refused
+[PASS] Foxl take-over streams that Chrome tab, its screen tap changes the original page, and the internal tool resumes on the same document
+[PASS] Closing Foxl detaches; the existing Chrome, unrelated tabs and login remain, with no copied Foxl browser profile

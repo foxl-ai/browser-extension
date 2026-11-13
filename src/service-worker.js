@@ -11,6 +11,16 @@
 import { createInputQueue } from './input-queue.js';
 import { captureTabScreenshot, readAllowedPage } from './page-capture.js';
 import { getPageSnapshot, clearPageSnapshots } from './page-snapshot.js';
+import { createSharedChrome } from './shared-chrome.js';
+
+// A Chrome-profile identity for this browser lifetime, stable across worker/socket
+// restarts. It is an identifier, not an authentication credential.
+const sharedBrowserIdentity = chrome.storage.session.get('sharedBrowserIdentity').then(async saved => {
+  if (typeof saved.sharedBrowserIdentity === 'string') return saved.sharedBrowserIdentity;
+  const value = crypto.randomUUID();
+  await chrome.storage.session.set({ sharedBrowserIdentity: value });
+  return value;
+});
 
 // Configuration - try production port first, then dev
 const SERVER_PORTS = [13847, 3847];
@@ -132,7 +142,10 @@ let focusedTabId = null; // The tab currently focused for agent operations
  * and holds back a form the desktop's chat already sent (`step-watch`, step-watch.js).
  * 0.12.1: a sign-in saved in Foxl Desktop is typed into the tab's own page (`fill-sign-in`, `fill_sign_in`).
  */
-const CAPABILITIES = ['read-marks', 'read-text', 'downloads', 'tab-openers', 'step-watch', 'fill-sign-in'];
+// Child CDP sessions require Chrome 125; older Chrome keeps the existing extension tools.
+// developer.chrome.com/docs/extensions/reference/api/debugger#attach-to-related-targets
+const CAPABILITIES = ['read-marks', 'read-text', 'downloads', 'tab-openers', 'step-watch', 'fill-sign-in',
+  ...(Number(navigator.userAgent.match(/(?:Chrome|Chromium)\/(\d+)/)?.[1] || 0) >= 125 ? ['shared-chrome-cdp'] : [])];
 
 /*
  * WHERE FOXL LAST ACTED: the last time Foxl clicked, typed, pressed a key, chose an option or
@@ -217,7 +230,7 @@ async function connectToServer() {
       console.log('[Foxl] Connecting to', wsUrl);
       serverSocket = new WebSocket(wsUrl);
       
-      serverSocket.onopen = () => {
+      serverSocket.onopen = async () => {
         console.log('[Foxl] Connected to server');
         isConnecting = false;
         /*
@@ -245,7 +258,7 @@ async function connectToServer() {
         getServerUrl().then(url => { discoveredServerUrl = url; });
         serverSocket.send(JSON.stringify({
           type: 'extension_connected',
-          data: { version: chrome.runtime.getManifest().version, capabilities: CAPABILITIES }
+          data: { version: chrome.runtime.getManifest().version, capabilities: CAPABILITIES, browserIdentity: await sharedBrowserIdentity }
         }));
         
         // Start keep-alive ping to prevent service worker from sleeping
@@ -496,6 +509,13 @@ function broadcastTabContexts() {
  */
 const INPUT_ACTIONS = new Set(['click', 'type', 'select', 'click_at', 'press_key', 'hover', 'fill_sign_in']);
 const inputQueue = createInputQueue();
+const sharedChrome = createSharedChrome({
+  knownTabs: () => [...tabContexts.keys()],
+  registerTab: async tabId => {
+    trackTab(tabId, null, true);
+    await addTabToPilotGroup(tabId);
+  },
+});
 
 /**
  * Execute browser command from server
@@ -527,6 +547,12 @@ async function executeBrowserCommand(command) {
       return step && step.settled !== 'nothing' || watched.leftover ? out : result;
     }
     switch (action) {
+      case 'shared_cdp_connect':
+        if (params?.browserIdentity !== await sharedBrowserIdentity) {
+          throw new Error('This is a different Chrome session; the shared connection was not opened.');
+        }
+        return await sharedChrome.connect(params?.url);
+
       case 'get_accessibility_tree':
         if (params?.snapshot) return withDownloads(await getPageSnapshot(targetTabId, params), targetTabId);
         return withDownloads(await getAccessibilityTree(targetTabId, params), targetTabId);

@@ -81,8 +81,9 @@ const lineOf = (text, needle) => text.split('\n').find((line) => line.includes(n
 const refOf = (line) => /\[(ref_[^\]\s]+)\]/.exec(line)?.[1] ?? null;
 
 test('the build announces what it can do beyond its version', () => {
-  assert.deepEqual([...(ext.announced.capabilities ?? [])].sort(), ['downloads', 'fill-sign-in', 'read-marks', 'read-text', 'step-watch', 'tab-openers'],
+  assert.deepEqual([...(ext.announced.capabilities ?? [])].sort(), ['downloads', 'fill-sign-in', 'read-marks', 'read-text', 'shared-chrome-cdp', 'step-watch', 'tab-openers'],
     `extension_connected: ${JSON.stringify(ext.announced)}`);
+  assert.match(ext.announced.browserIdentity, /^[a-f0-9-]{36}$/, 'the live Chrome session identifies itself');
 });
 
 test('1. a cut element text is marked, counted and listed (get_tree and snapshot)', async () => {
