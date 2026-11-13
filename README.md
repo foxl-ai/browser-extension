@@ -128,6 +128,18 @@ A click, a key press, or typing that presses Enter waits for what it sent before
 
 Screenshots capture a background tab without selecting it, including a chosen rectangle or the full document. On a compatible desktop, snapshots can return just the changes since a previously read snapshot. A service worker handles the desktop connection, tab management, and command dispatch; content scripts carry out page actions and display activity indicators.
 
+With a desktop that supports shared Chrome and Chrome 125 or newer, Foxl's internal browser
+can use this same profile and its sign-ins. A task opens a real Chrome tab in the Foxl group;
+both browser tools can work on that tab. Foxl's take-over screen streams that same page and
+sends your input to it. The Chrome window stays a normal Chrome window.
+
+The connection exposes only tabs registered with Foxl or created for its tasks. It does not
+copy your Chrome profile. Closing the connection detaches Foxl, leaving Chrome and your
+existing tabs open. A different Chrome session requires restarting Foxl before switching;
+an existing private Foxl browser also keeps its mode until restart. Older desktops and
+extensions keep their existing browser behavior. This does not guarantee that a site will
+accept automated activity.
+
 ## Where your data goes
 
 **By default, extension traffic goes to Foxl on your computer.** It discovers `http://localhost:13847`, with `http://localhost:3847` as the fallback. The options page can override that server URL; a custom endpoint changes where extension data is sent.
@@ -145,6 +157,7 @@ The network entry points are small enough to inspect directly:
 | Source | Requests |
 | :--- | :--- |
 | [Service worker](src/service-worker.js) | Health probes at `/api/health`, a WebSocket at `/extension`, and chat requests at `/api/chat` |
+| [Shared Chrome](src/shared-chrome.js) | An outgoing WebSocket to a random `127.0.0.1` port, using a capability supplied by the configured desktop, for the internal browser and take-over screen |
 | [Request watch](src/content-scripts/request-watch.js) | None. It wraps the page's own `fetch` and `XMLHttpRequest` to count the requests still running, and passes every call through unchanged |
 
 The settings page asks the service worker for its actual connection status.
@@ -165,7 +178,7 @@ The manifest requests access to all sites so the agent can work on the pages you
 | `<all_urls>` | Read and interact with the pages you allow. |
 | `tabs` | Read tab titles and URLs, navigate, and open, switch, or close tabs. |
 | `scripting` | Read snapshots, scroll, and check the target page's current site access before and after a screenshot. |
-| `debugger` | Briefly attach to a background tab to read its viewport and capture its pixels without selecting it. |
+| `debugger` | Capture background tabs, or keep a shared task tab attached for internal browser commands and the take-over screen. |
 | `tabGroups` | Organize tabs opened for agent tasks. |
 | `sidePanel` | Show the conversation beside the current page. |
 | `storage` | Save connection and appearance settings locally. |
@@ -180,7 +193,15 @@ asks you to accept the `debugger` permission introduced in 0.9 ("Access the page
 backend"). If Foxl is disabled after updating, open Chrome's menu and choose "Foxl is
 disabled", or re-enable it in `chrome://extensions` and review the permission prompt.
 
-While Foxl captures a background tab, or draws one after scrolling it, Chrome shows a bar at the top of every tab in every window: "Foxl" started debugging this browser, with a Cancel button. The bar shortens the page you are viewing and closes 5 seconds after the last capture. The tab you are looking at is captured without the debugger. The API has broad capabilities; this extension uses only `Page.getLayoutMetrics` and `Page.captureScreenshot`, checks site access with `scripting` before attaching and before returning pixels, and detaches after each capture. It exposes no arbitrary CDP command, cookie reader, or network recorder. Where Chrome refuses the debugger (an administrator's DevTools policy, a page containing another extension's frame) or cannot draw a background tab (a PDF), a screenshot selects the tab for a moment and switches back, as 0.8 did. Without site access, a screenshot fails.
+Chrome shows a "Foxl started debugging this browser" bar while a debugger is attached.
+Shared Chrome keeps that attachment while an internal browser client uses a tab. It forwards
+tab CDP commands, including page evaluation, input, screenshots, streaming and requested
+network observations; current-page cookies can be read, but profile-wide cookie export,
+cookie replacement and storage export are refused. Existing user tabs cannot be closed through
+this bridge, and browser-wide operations such as quitting Chrome or changing its download
+directory are unsupported. Site access is checked before attachment, tab commands and
+streamed frames. Disconnect detaches clients. Ordinary background screenshots retain their
+short-lived attachment and existing fallback when Chrome refuses background capture.
 
 [manifest.json](manifest.json) declares the permissions. [scripts/audit.mjs](scripts/audit.mjs) checks permission usage and the network and executable-code surface in CI.
 
@@ -192,6 +213,7 @@ While Foxl captures a background tab, or draws one after scrolling it, Chrome sh
 | [src/input-queue.js](src/input-queue.js) | One click / type / key at a time per tab, each with a deadline |
 | [src/page-capture.js](src/page-capture.js) | Background screenshots, page-access checks, and CSS geometry |
 | [src/page-snapshot.js](src/page-snapshot.js) | Bounded snapshots and explicit baselines for changes |
+| [src/shared-chrome.js](src/shared-chrome.js) | Shared-profile CDP transport, registered tab scope and debugger lifetime |
 | [src/content-scripts/](src/content-scripts/) | Page accessibility tree and visual indicators |
 | [src/sidepanel.js](src/sidepanel.js) · [sidepanel.html](sidepanel.html) | Side panel conversation |
 | [src/panel-context.js](src/panel-context.js) | Current-window page selection and bounded conversation context |

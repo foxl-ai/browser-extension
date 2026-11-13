@@ -1,0 +1,12 @@
+{
+  "measuredAt": "2026-11-13T05:39:30.399Z",
+  "chrome": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+  "extensionVersion": "0.12.2",
+  "passed": [
+    "The internal browser reads the HttpOnly login cookie and localStorage of the already running Chrome profile",
+    "The real extension tool edits the same live tab that the internal browser reads",
+    "Real CDP clients stay separate; page origins, unregistered tabs, profile export and closing existing Chrome tabs are refused",
+    "Foxl take-over streams that Chrome tab, its screen tap changes the original page, and the internal tool resumes on the same document",
+    "Closing Foxl detaches; the existing Chrome, unrelated tabs and login remain, with no copied Foxl browser profile"
+  ]
+}
