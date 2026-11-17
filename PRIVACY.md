@@ -5,13 +5,15 @@ services have their own policy at <https://foxl.ai/privacy>; that distinction
 matters here: the extension hands page data to its configured Foxl server, and the
 desktop app decides what context to send to the model or connected service.
 
-Last updated: November 5, 2026.
+Last updated: November 17, 2026.
 
 ## The short version
 
-By default, the extension talks to the Foxl desktop app on your own computer, at
-`http://localhost:13847`, with port `3847` as a fallback. A custom server URL in
-the options changes that destination. There is no analytics, no telemetry, no
+By default, the extension talks to the Foxl desktop app on your own computer:
+through Chrome's native messaging to the desktop's own browser bridge (since 0.14.0),
+or, when the bridge is not available, at `http://localhost:13847`, with port `3847`
+as a fallback. A custom server URL in the options changes the second destination;
+the bridge always reaches the desktop app that installed it. There is no analytics, no telemetry, no
 crash reporting, no remote configuration, and no third-party code in this
 extension.
 

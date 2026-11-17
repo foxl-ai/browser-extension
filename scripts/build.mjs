@@ -27,11 +27,17 @@
  *
  * Zero dependencies on purpose: the release artifact of an extension people are
  * auditing should not be produced by code they also have to audit.
+ *
+ * ONE FILE DIFFERS FROM THE CHECKOUT: the zip's manifest.json has no `key` line.
+ * The zip is what the Chrome Web Store receives, and the key exists only so a
+ * copy loaded unpacked from this repository has the store build's ID
+ * (scripts/store-manifest.mjs says why, and what it refuses).
  */
 import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { storeManifest } from './store-manifest.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = join(root, 'dist');
@@ -101,7 +107,14 @@ const centrals = [];
 let offset = 0;
 
 for (const name of files) {
-  const data = readFileSync(join(root, name.split(posix.sep).join(sep)));
+  let data = readFileSync(join(root, name.split(posix.sep).join(sep)));
+  // The zip is what the store receives: manifest.json goes in without its `key` (scripts/store-manifest.mjs).
+  if (name === 'manifest.json') {
+    data = Buffer.from(storeManifest(data.toString('utf8')), 'utf8');
+    if (Object.prototype.hasOwnProperty.call(JSON.parse(data.toString('utf8')), 'key')) {
+      throw new Error('manifest.json in the zip still carries "key"');
+    }
+  }
   const nameBuf = Buffer.from(name, 'utf8');
   const crc = crc32(data);
 

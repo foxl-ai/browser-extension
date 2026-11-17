@@ -6,7 +6,32 @@ This extension has its own version line, independent of the Foxl Desktop release
 number. It used to ship inside the Foxl monorepo, where a script kept its manifest
 version pinned to the app's unified line; the split makes the two independent.
 
-## v0.12.2 (unreleased)
+## v0.14.0 - November 17, 2026
+
+### Changed
+
+- **Foxl connects to Foxl Desktop through Chrome's native messaging.** Over the local
+  WebSocket the desktop could identify the extension only by the `Origin` header, which
+  any program on the computer can write. Now Chrome starts Foxl Desktop's browser bridge
+  itself and lets only this extension reach it, and the bridge presents the desktop's own
+  connection key from your home folder. Nothing is stored in the browser and there is no
+  code to copy. What this does not stop is in the README ("How the local connection is
+  secured").
+- **This update asks for one new permission**, `nativeMessaging` ("Communicate with
+  cooperating native applications"). Chrome turns Foxl off after an update that adds a
+  permission until you accept it: open Chrome's menu and choose "Foxl is disabled", or
+  open `chrome://extensions`, and accept.
+- **A copy loaded unpacked from this repository has the store build's ID**
+  (`ijlihobebaeangjiacfomjdkhlpbmlhi`): `manifest.json` carries the Chrome Web Store item's
+  public key, so Chrome starts the bridge for it too. The release zip, which is what the
+  store receives, leaves that key out; the store gives its own build the same ID.
+- A desktop without the bridge still gets the WebSocket, so browser control keeps working.
+- A desktop that requires the bridge, when Chrome could not start it, no longer shows as
+  connected or "Reconnecting": the side panel and the options page say to open Foxl
+  Desktop's Settings > Web Access and choose Reinstall browser connection.
+- There is no 0.13.0. That number belonged to a build that was never released.
+
+## v0.12.2 - November 11, 2026
 
 ### Fixed
 

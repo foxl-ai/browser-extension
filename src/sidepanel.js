@@ -141,7 +141,9 @@ async function refreshPage() {
 
 function updateConnection(status) {
   connectionStatus = status;
-  connected = Boolean(status.connected);
+  // A desktop that requires the verified browser connection refused the local socket: not connected, and why.
+  const needsBridge = Boolean(status.desktopRequiresBridge);
+  connected = Boolean(status.connected) && !needsBridge;
   $('statusDot').classList.toggle('connected', connected);
   $('connectionLabel').textContent = connected ? 'Connected to Desktop' : 'Desktop not connected';
   $('connectionStatus').title = status.desktopVersion
@@ -158,6 +160,12 @@ function updateConnection(status) {
       : 'Foxl Desktop is required. Open the app to connect your agent and start working beside the page.';
     $('setupCta').hidden = Boolean(status.everConnected);
     $('setupGone').hidden = !status.everConnected;
+    if (needsBridge) {
+      $('setupTitle').textContent = 'Let’s reconnect.';
+      $('setupBody').textContent = 'In Foxl Desktop, open Settings > Web Access and choose Reinstall browser connection.';
+      $('setupCta').hidden = true;
+      $('setupGone').hidden = true;
+    }
   }
   if (connected && status.desktopTooOld && !document.querySelector('[data-version-notice]')) {
     const notice = addMessage('system', `Foxl Desktop ${status.desktopVersion} needs an update for some features. Open Desktop to update.`);
