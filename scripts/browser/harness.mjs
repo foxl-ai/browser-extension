@@ -17,8 +17,22 @@
  * granted at load: headless Chromium cannot answer the prompt chrome.permissions.request opens
  * (measured: a click on the options page's Allow left it not granted). The shipped manifest keeps it
  * optional, which scripts/audit.mjs reports and the suite's not-granted case runs against.
+ *
+ * NEVER THE REAL BROWSER BRIDGE EITHER (0.14.0). The extension first asks Chrome for the native-messaging
+ * host `ai.foxl.browser_bridge`, which Foxl Desktop installs for every Chromium browser it knows, and the
+ * checkout's manifest carries the store item's `key`, so an unpacked copy has the store ID that host admits.
+ * A test that reached that host would start the REAL bridge, which presents the real desktop's key to the
+ * real desktop (on a Mac with Foxl Desktop, `~/Library/Application Support/Chromium/NativeMessagingHosts/
+ * ai.foxl.browser_bridge.json` exists and admits the store ID). The run's profile is a fresh folder, and
+ * Chromium 156 read user-level hosts from the profile's own NativeMessagingHosts folder on macOS and Linux
+ * (native-bridge.test.mjs), so that host is out of reach already; the harness does not rely on it. A build
+ * that declares `nativeMessaging` asks for `HARNESS_HOST_NAME` instead (the constant matched exactly once,
+ * like SERVER_PORTS, or the harness refuses to start), and every copy carries a key minted for this run in
+ * place of the store's, so its ID is one no installed host lists. `nativeHost` installs a host under that
+ * name for this run's profile only (`native-host-relay.mjs`), connected to this harness.
  */
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash, generateKeyPairSync, randomBytes } from 'node:crypto';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
@@ -29,28 +43,76 @@ import { WebSocketServer } from 'ws';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SKIP = new Set(['node_modules', '.git', 'dist', 'store', 'docs', '.store-research']);
 
-/** A copy of the extension whose service worker looks for the desktop on `port` only. */
+/** The native-messaging host a copy asks for: no Foxl Desktop installs one by this name. */
+export const HARNESS_HOST_NAME = 'ai.foxl.browser_bridge_harness';
+const STORE_ID = 'ijlihobebaeangjiacfomjdkhlpbmlhi';
+
+/** A key minted for one run, and the extension ID Chrome derives from it (SHA-256 of the DER key, 0-f as a-p). */
+function runKey() {
+  const { publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const der = publicKey.export({ type: 'spki', format: 'der' });
+  const id = createHash('sha256').update(der).digest('hex').slice(0, 32)
+    .replace(/[0-9a-f]/g, (c) => String.fromCharCode(97 + parseInt(c, 16)));
+  return { key: der.toString('base64'), id };
+}
+
+/** A copy of the extension whose service worker looks for the desktop on `port` only, with this run's key. */
 function extensionCopy(port, grant = []) {
   const source = process.env.FOXL_EXTENSION_DIR ? resolve(process.env.FOXL_EXTENSION_DIR) : ROOT;
   const dir = mkdtempSync(join(tmpdir(), 'foxl-extension-'));
   cpSync(source, dir, { recursive: true, filter: (from) => !SKIP.has(from.slice(source.length + 1).split(/[\\/]/)[0]) });
   const worker = join(dir, 'src', 'service-worker.js');
-  const text = readFileSync(worker, 'utf8');
+  let text = readFileSync(worker, 'utf8');
   const pattern = /const SERVER_PORTS = \[13847, 3847\];/g;
   const found = text.match(pattern)?.length ?? 0;
   if (found !== 1) throw new Error(`expected SERVER_PORTS = [13847, 3847] once in ${worker}, found ${found}: refusing to run against a real desktop's ports`);
-  writeFileSync(worker, text.replace(pattern, `const SERVER_PORTS = [${port}];`));
-  if (grant.length) {
-    const path = join(dir, 'manifest.json');
-    const manifest = JSON.parse(readFileSync(path, 'utf8'));
-    for (const name of grant) {
-      if (!(manifest.optional_permissions ?? []).includes(name)) throw new Error(`"${name}" is not an optional permission of this build`);
-      manifest.optional_permissions = manifest.optional_permissions.filter((p) => p !== name);
-      manifest.permissions = [...(manifest.permissions ?? []), name];
-    }
-    writeFileSync(path, JSON.stringify(manifest, null, 2));
+  text = text.replace(pattern, `const SERVER_PORTS = [${port}];`);
+  const path = join(dir, 'manifest.json');
+  const manifest = JSON.parse(readFileSync(path, 'utf8'));
+  if ((manifest.permissions ?? []).includes('nativeMessaging') || (manifest.optional_permissions ?? []).includes('nativeMessaging')) {
+    const host = /const NATIVE_HOST_NAME = 'ai\.foxl\.browser_bridge';/g;
+    const hosts = text.match(host)?.length ?? 0;
+    if (hosts !== 1) throw new Error(`expected NATIVE_HOST_NAME = 'ai.foxl.browser_bridge' once in ${worker}, found ${hosts}: refusing to run a build that could reach a real desktop's bridge`);
+    text = text.replace(host, `const NATIVE_HOST_NAME = '${HARNESS_HOST_NAME}';`);
   }
-  return dir;
+  writeFileSync(worker, text);
+  const { key, id } = runKey();
+  if (id === STORE_ID) throw new Error('a run key derived to the store ID');
+  manifest.key = key;
+  for (const name of grant) {
+    if (!(manifest.optional_permissions ?? []).includes(name)) throw new Error(`"${name}" is not an optional permission of this build`);
+    manifest.optional_permissions = manifest.optional_permissions.filter((p) => p !== name);
+    manifest.permissions = [...(manifest.permissions ?? []), name];
+  }
+  writeFileSync(path, JSON.stringify(manifest, null, 2));
+  return { dir, id };
+}
+
+/** Single-quoted for /bin/sh. */
+const sh = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
+
+/**
+ * This run's host: a manifest named `HARNESS_HOST_NAME` in the profile's own NativeMessagingHosts folder, admitting
+ * exactly the copy's ID, whose program runs `native-host-relay.mjs` against `url`. The profile is
+ * `<XDG_CONFIG_HOME>/chromium`, the layout Linux Chromium reads user-level hosts from (developer.chrome.com/docs/
+ * extensions/develop/concepts/native-messaging, "Native messaging host location"), and the browser gets that
+ * XDG_CONFIG_HOME; macOS Chromium read the same folder of the same profile (measured, Chromium 156). Nothing
+ * outside the run's folder is read or written.
+ */
+function installHarnessHost({ profile, config, id, url, mode }) {
+  const program = join(config, 'foxl-harness-bridge');
+  const relay = join(ROOT, 'scripts', 'browser', 'native-host-relay.mjs');
+  writeFileSync(program, `#!/bin/sh\nFOXL_HARNESS_BRIDGE_URL=${sh(url)} FOXL_HARNESS_BRIDGE_MODE=${sh(mode)} exec ${sh(process.execPath)} ${sh(relay)} "$@"\n`);
+  chmodSync(program, 0o755);
+  const hosts = join(profile, 'NativeMessagingHosts');
+  mkdirSync(hosts, { recursive: true });
+  writeFileSync(join(hosts, `${HARNESS_HOST_NAME}.json`), JSON.stringify({
+    name: HARNESS_HOST_NAME,
+    description: 'Foxl extension test harness bridge',
+    path: program,
+    type: 'stdio',
+    allowed_origins: [`chrome-extension://${id}/`],
+  }, null, 2));
 }
 
 /**
@@ -59,12 +121,20 @@ function extensionCopy(port, grant = []) {
  *
  * `refuseSocket: 4004` closes every `/extension` socket at once with that code, as a Foxl Desktop that requires
  * the verified browser connection refuses an unpaired one (0.14.0); the launch then resolves without waiting for
- * an announcement, and `announced` is null.
+ * an announcement, and `announced` is null. A socket the run's own bridge opens is never refused.
+ *
+ * `nativeHost: 'relay'` installs this run's bridge (`installHarnessHost`), which reaches this harness with
+ * `?pairing=<this run's value>` the way Foxl Desktop's bridge presents its key; `'unreachable'` installs one that
+ * answers the extension's ping with an error frame and exits, as the real bridge does when it cannot reach the
+ * desktop. `sockets` lists every `/extension` socket the harness accepted or refused, in order:
+ * `{ paired, caller, refused }` (`caller` is the origin Chrome gave the bridge as its first argument).
  */
-export async function launchExtension({ routes = {}, grant = [], refuseSocket = null } = {}) {
+export async function launchExtension({ routes = {}, grant = [], refuseSocket = null, nativeHost = null } = {}) {
   let socket = null;
   let hello = null;
   let nextId = 1;
+  const pairing = randomBytes(16).toString('hex');
+  const seen = [];
   const waiting = new Map();
   let onHello;
   const helloSeen = new Promise((r) => { onHello = r; });
@@ -83,9 +153,13 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
   });
   const sockets = new WebSocketServer({ noServer: true });
   server.on('upgrade', (req, sock, head) => {
-    if (new URL(req.url, 'http://localhost').pathname !== '/extension') { sock.destroy(); return; }
+    const url = new URL(req.url, 'http://localhost');
+    if (url.pathname !== '/extension') { sock.destroy(); return; }
     sockets.handleUpgrade(req, sock, head, (ws) => {
-      if (refuseSocket) { ws.close(refuseSocket, 'extension_pairing_required'); return; }
+      const paired = url.searchParams.get('pairing') === pairing;
+      const entry = { paired, caller: url.searchParams.get('caller'), refused: false };
+      seen.push(entry);
+      if (refuseSocket && !paired) { entry.refused = true; ws.close(refuseSocket, 'extension_pairing_required'); return; }
       socket = ws;
       ws.on('message', (raw) => {
         let msg;
@@ -110,13 +184,20 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
    * 0.10.0, whose manifest has no optional `downloads` to grant, hung for 25 minutes).
    */
   let extDir = null;
-  let profile = null;
+  let config = null;
   let context = null;
   let announced;
   let helloTimer;
+  let extensionId = null;
   try {
-    extDir = extensionCopy(port, grant);
-    profile = mkdtempSync(join(tmpdir(), 'foxl-extension-profile-'));
+    ({ dir: extDir, id: extensionId } = extensionCopy(port, grant));
+    config = mkdtempSync(join(tmpdir(), 'foxl-extension-profile-'));
+    const profile = join(config, 'chromium');
+    mkdirSync(profile, { recursive: true });
+    if (nativeHost) {
+      if (!['relay', 'unreachable'].includes(nativeHost)) throw new Error(`nativeHost must be 'relay' or 'unreachable', got ${JSON.stringify(nativeHost)}`);
+      installHarnessHost({ profile, config, id: extensionId, url: `ws://127.0.0.1:${port}/extension?pairing=${pairing}`, mode: nativeHost });
+    }
     context = await chromium.launchPersistentContext(profile, {
       channel: 'chromium',
       headless: true,
@@ -124,8 +205,9 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
       ignoreDefaultArgs: ['--disable-popup-blocking'],
       args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
       acceptDownloads: true,
+      env: { ...process.env, XDG_CONFIG_HOME: config },
     });
-    announced = refuseSocket ? null : await Promise.race([
+    announced = refuseSocket && nativeHost !== 'relay' ? null : await Promise.race([
       helloSeen,
       new Promise((_, reject) => { helloTimer = setTimeout(() => reject(new Error('the extension never connected to the test desktop')), 20_000); }),
     ]);
@@ -134,7 +216,7 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
     sockets.close();
     await new Promise((r) => server.close(r));
     if (extDir) rmSync(extDir, { recursive: true, force: true });
-    if (profile) rmSync(profile, { recursive: true, force: true });
+    if (config) rmSync(config, { recursive: true, force: true });
     throw err;
   } finally {
     clearTimeout(helloTimer);
@@ -159,10 +241,12 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
 
   const close = async () => {
     await context.close().catch(() => {});
+    for (const ws of sockets.clients) ws.terminate();
     sockets.close();
+    server.closeAllConnections?.();
     await new Promise((r) => server.close(r));
     rmSync(extDir, { recursive: true, force: true });
-    rmSync(profile, { recursive: true, force: true });
+    rmSync(config, { recursive: true, force: true });
   };
-  return { context, origin, command, tabIdOf, announced, close };
+  return { context, origin, command, tabIdOf, announced, close, extensionId, sockets: seen };
 }

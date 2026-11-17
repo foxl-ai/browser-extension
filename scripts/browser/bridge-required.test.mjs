@@ -6,11 +6,11 @@
  * When Chrome could not start the bridge (no host installed for this profile, here), the extension must not
  * read as connected: the desktop's health check still answers, so before 0.14.0 the options page said
  * "Connected to Foxl Desktop" and the side panel offered the chat while every command failed. Each case is
- * RED on 0.13.0 (feat/5882-frames-fill-sign-in, 539bfe3).
+ * RED on 0.12.2 (main c4ba4ae, the build the Chrome Web Store serves before 0.14.0).
  *
- * The real extension in Chromium (scripts/browser/harness.mjs with `refuseSocket: 4004`: every /extension socket
- * closed at once, as an enforced desktop closes an unpaired one). Playwright's profile has no native messaging
- * host, so `connectNative` finds none, the extension falls back to the socket, and the socket is refused.
+ * The real extension in Chromium (scripts/browser/harness.mjs with `refuseSocket: 4004`: every unpaired /extension
+ * socket closed at once, as an enforced desktop closes one). The run's profile has no host under the harness's host
+ * name, so `connectNative` finds none, the extension falls back to the socket, and the socket is refused.
  * Run: npm run test:browser. FOXL_EXTENSION_DIR=<a tree> runs it against that build.
  */
 import assert from 'node:assert/strict';
