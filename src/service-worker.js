@@ -1632,6 +1632,10 @@ async function filledFor(tabId) {
     saveFilled();
     return null;
   }
+  // Only to a page on the site the values were typed for: a document the tab moved on to gets none of them.
+  let tabOrigin = null;
+  try { tabOrigin = originOf((await chrome.tabs.get(tabId)).url); } catch { tabOrigin = null; }
+  if (tabOrigin !== entry.origin) return null;
   return { origin: entry.origin, salt: entry.salt, prints: entry.prints.slice() };
 }
 
