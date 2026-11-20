@@ -4,9 +4,9 @@
  * A command acts only in a tab Foxl opened, a tab in the Foxl group (a person moves one there: the harness's
  * `tabIdOf`), the tab the person sends a message from in Foxl's side panel, and the tabs those open; any other is
  * refused by name with nothing done, and get_tabs names only Foxl's tabs (the others are a count). The person's tab
- * here holds "A private note". Each refusal case,
- * and the listing, is RED on 0.14.0 (main a11298c); the first case and the side
- * panel's are the controls, green on both. The case that would change the tab runs last.
+ * here holds "A private note". The desktop's show_indicators draws the overlay on Foxl's tabs only. Each refusal
+ * case, the listing and the overlay case are RED on 0.14.0 (main a11298c); the first case and the side panel's are
+ * the controls, green on both. The case that would change the tab runs last.
  *
  * The real extension in Chromium (scripts/browser/harness.mjs). Run: npm run test:browser.
  * FOXL_EXTENSION_DIR=<a tree> runs it against that build.
@@ -50,6 +50,7 @@ const refused = (answer, tabId) => {
   assert.equal(answer.notFoxlTab, true, JSON.stringify(answer));
   assert.match(String(answer.error), new RegExp(`Tab ${tabId} is not one of Foxl's tabs, so nothing was done`));
 };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const refOf = (tree, needle) => new RegExp(`${needle}[^\\n]*\\[(ref_\\d+)\\]`).exec(tree)?.[1];
 
 test('a command on a Foxl tab works as before', async () => {
@@ -109,6 +110,16 @@ test('the tab the person sends a message from in Foxl\'s side panel is handed to
   assert.equal(typed?.success, true, JSON.stringify(typed));
   assert.equal(await notes.evaluate(() => document.getElementById('note').value), 'Buy milk');
   await panel.close();
+});
+
+test('the desktop\'s show_indicators puts the overlay and its Stop on Foxl\'s tabs only', async () => {
+  ext.send({ type: 'show_indicators', data: { tabId: personTab } });
+  ext.send({ type: 'show_indicators', data: { tabId: foxlTab } });
+  // CONTROL: Foxl's own tab shows it.
+  await foxlPage.locator('#pilot-agent-stop-button').waitFor({ state: 'visible', timeout: 10_000 });
+  await sleep(1_000);
+  assert.equal(await personPage.locator('#pilot-agent-stop-button').count(), 0, 'the overlay is on the person\'s tab');
+  ext.send({ type: 'hide_indicators', data: { tabId: foxlTab } });
 });
 
 test('typing, a click, a key, a navigation and a close naming another tab are refused, and the tab is unchanged', async () => {
