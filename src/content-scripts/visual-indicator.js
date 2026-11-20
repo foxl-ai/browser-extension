@@ -168,7 +168,9 @@
       }
     });
 
-    button.addEventListener('click', async () => {
+    // The person's own click only: a page that calls click() on this button, or dispatches one at it, stops nothing.
+    button.addEventListener('click', async (event) => {
+      if (!event.isTrusted) return;
       try {
         await chrome.runtime.sendMessage({ type: 'STOP_AGENT' });
       } catch (err) {

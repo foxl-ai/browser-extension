@@ -7,7 +7,8 @@
  * begins a new run. The held cases are RED on 0.14.0 (main a11298c); the
  * new-run cases are the controls.
  *
- * The person's Stop is a real click on the overlay's button (Playwright's, a trusted one). The real extension in
+ * The person's Stop is a real click on the overlay's button (Playwright's, a trusted one); a click the page's own
+ * script makes on that button stops nothing (the first case, RED on 0.14.0). The real extension in
  * Chromium (scripts/browser/harness.mjs). Run: npm run test:browser. FOXL_EXTENSION_DIR=<a tree> runs it against that build.
  */
 import assert from 'node:assert/strict';
@@ -58,6 +59,26 @@ const held = (answer) => {
   assert.equal(answer.stopped, true, JSON.stringify(answer));
   assert.match(String(answer.error), /pressed Stop Foxl/);
 };
+
+test('a click the page itself makes on Stop Foxl stops nothing: the desktop is not told, and the next command runs', async () => {
+  const stops = ext.frames.filter((f) => f.type === 'stop_agent').length;
+  ext.send({ type: 'show_indicators', data: { tabId } });
+  const button = page.locator('#pilot-agent-stop-button');
+  await button.waitFor({ state: 'visible', timeout: 10_000 });
+  await sleep(400); // the button slides in
+  // The page's own script, in its own world: click(), and a dispatched click event.
+  await page.evaluate(() => {
+    const stop = document.getElementById('pilot-agent-stop-button');
+    stop.click();
+    stop.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+  await sleep(1_500);
+  assert.equal(ext.frames.filter((f) => f.type === 'stop_agent').length, stops, 'a click the page made told the desktop to stop');
+  const tree = await ext.command('get_accessibility_tree', tabId, { filter: 'all' });
+  assert.equal(tree?.success, true, JSON.stringify(tree));
+  ext.send({ type: 'hide_indicators', data: { tabId } });
+  await sleep(500);
+});
 
 test('after Stop, a read and a type of the stopped run are refused, and the page sees no input', async () => {
   await pressStop();
