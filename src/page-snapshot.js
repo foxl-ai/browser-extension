@@ -9,7 +9,8 @@ const snapshots = new Map();
 const MAX_BASELINES = 32;
 const BASELINE_TTL_MS = 5 * 60_000;
 
-export async function getPageSnapshot(tabId, options = {}) {
+/** `filled`: the fingerprints of what a saved sign-in typed in this tab (service-worker.js), masked in every line. */
+export async function getPageSnapshot(tabId, options = {}, filled = null) {
   if (!Number.isSafeInteger(tabId) || tabId <= 0) throw new Error('A target tab is required for a snapshot.');
   const filter = options.filter || 'visible';
   const depth = options.depth ?? 15;
@@ -23,12 +24,12 @@ export async function getPageSnapshot(tabId, options = {}) {
   }
   // Bound the actual tree read too: Chrome can leave a scripting request pending
   // while site access is withheld, even on a previously injected page.
-  const page = await readAllowedPage(tabId, ({ filter, depth }) => {
+  const page = await readAllowedPage(tabId, ({ filter, depth, filled }) => {
       if (!window.__generateAccessibilityTree) throw new Error('The page reader is not ready. Reload the page.');
-      const tree = window.__generateAccessibilityTree(filter, depth);
+      const tree = window.__generateAccessibilityTree(filter, depth, undefined, undefined, filled);
       if (tree.error) throw new Error(tree.error);
       return { ...tree, url: location.href, title: document.title };
-    }, [{ filter, depth }]);
+    }, [{ filter, depth, filled }]);
   if (typeof page.pageContent !== 'string') {
     throw new Error('Chrome returned no page snapshot.');
   }

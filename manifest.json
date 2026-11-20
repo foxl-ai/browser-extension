@@ -37,7 +37,7 @@
       "world": "MAIN"
     },
     {
-      "js": ["src/content-scripts/accessibility-tree.js"],
+      "js": ["src/content-scripts/filled-print.js", "src/content-scripts/accessibility-tree.js"],
       "matches": ["<all_urls>"],
       "run_at": "document_start",
       "all_frames": true

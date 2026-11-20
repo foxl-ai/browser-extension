@@ -12,6 +12,8 @@ import { createInputQueue } from './input-queue.js';
 import { captureTabScreenshot, readAllowedPage } from './page-capture.js';
 import { getPageSnapshot, clearPageSnapshots } from './page-snapshot.js';
 import { loopbackServerUrl } from './server-url.js';
+// globalThis.__foxlFilledPrint, the page reader's own fingerprint (WHAT A SAVED SIGN-IN TYPED, below).
+import './content-scripts/filled-print.js';
 
 // Configuration - try production port first, then dev
 const SERVER_PORTS = [13847, 3847];
@@ -1080,7 +1082,7 @@ async function dispatchBrowserCommand({ action, targetTabId, params, deadline })
     }
     switch (action) {
       case 'get_accessibility_tree':
-        if (params?.snapshot) return withDownloads(await getPageSnapshot(targetTabId, params), targetTabId);
+        if (params?.snapshot) return withDownloads(await getPageSnapshot(targetTabId, params, await filledFor(targetTabId)), targetTabId);
         return withDownloads(await getAccessibilityTree(targetTabId, params), targetTabId);
 
       // Added in 0.11.0 (#6245): one element's whole text, a slice at a time.
@@ -1207,12 +1209,12 @@ async function dispatchBrowserCommand({ action, targetTabId, params, deadline })
 async function readElementText(tabId, params = {}) {
   if (!tabId) return { success: false, error: 'No active tab' };
   if (typeof params?.refId !== 'string' || !params.refId) return { success: false, error: 'params.refId required for read_text' };
-  const page = await readAllowedPage(tabId, ({ refId, offset, maxChars }) => {
+  const page = await readAllowedPage(tabId, ({ refId, offset, maxChars, filled }) => {
     if (typeof window.__pilotReadText !== 'function') {
       return { url: location.href, success: false, error: 'This page was opened before Foxl\'s extension updated. Reload the page to read an element\'s whole text.' };
     }
-    return { ...window.__pilotReadText(refId, offset, maxChars), url: location.href };
-  }, [{ refId: params.refId, offset: params.offset ?? 0, maxChars: params.maxChars ?? 4000 }]);
+    return { ...window.__pilotReadText(refId, offset, maxChars, filled), url: location.href };
+  }, [{ refId: params.refId, offset: params.offset ?? 0, maxChars: params.maxChars ?? 4000, filled: await filledFor(tabId) }]);
   const { documentId: _documentId, ...result } = page;
   return { ...result, tabId };
 }
@@ -1385,7 +1387,8 @@ async function getAccessibilityTree(tabId, params = {}) {
       filter: params.filter || 'all',
       depth: params.depth || 15,
       maxChars: params.maxChars,
-      refId: params.refId
+      refId: params.refId,
+      filled: await filledFor(tabId),
     }, { frameId: 0 });
     if (!result?.success || result.data?.error) {
       return { success: false, error: result?.error || result?.data?.error || 'The page reader returned no result.' };
@@ -1463,9 +1466,14 @@ async function typeInElement(tabId, refId, text, submit = false, deadline) {
     if (!typed?.success) return typed || { success: false, error: `No answer from the page for ${refId}` };
     const method = typed.method;
 
-    const read = await chrome.tabs.sendMessage(tabId, { type: 'READ_VALUE', refId });
+    const read = await chrome.tabs.sendMessage(tabId, { type: 'READ_VALUE', refId, filled: await filledFor(tabId), text: String(text) });
     if (!read?.success) return read || { success: false, error: `Could not read ${refId} back` };
-    if (!read.password && !valueHolds(read.value, text)) {
+    // A field holding what a saved sign-in typed is read back without its value (WHAT A SAVED SIGN-IN TYPED).
+    if (read.filled) {
+      if (read.holds !== true) {
+        return { success: false, method, error: `Typed into ${refId}, but the field now holds what a saved sign-in typed, not the text. The page rejected or rewrote it.` };
+      }
+    } else if (!read.password && !valueHolds(read.value, text)) {
       return {
         success: false,
         method,
@@ -1548,6 +1556,67 @@ async function hoverElement(tabId, refId, x, y, deadline) {
  * after it (a dialog, a hung script) is refused there, never typed after the desktop was told it failed.
  */
 const SIGN_IN_KINDS = new Set(['username', 'password', 'code']);
+
+/*
+ * WHAT A SAVED SIGN-IN TYPED, WHEREVER THE PAGE PUTS IT (foxl-ai/pilot #7859). The page marks the element it typed
+ * into, and a page that draws the field again as a new element loses that mark. So for FILLED_WINDOW_MS after a fill,
+ * per tab and origin, this keeps a salted fingerprint of each value sent (src/content-scripts/filled-print.js), never
+ * the value, in chrome.storage.session (memory only, gone with the browser), and every read of the tab carries them
+ * (`filled`): the page reader shows `filled-by-foxl` for any text field whose value has one, in the tree, a
+ * snapshot, read_text and a typing's read-back. The window covers a sign-in's next steps; a value the person types
+ * later is theirs to show.
+ */
+const FILLED_WINDOW_MS = 10 * 60_000;
+const FILLED_KEY = 'foxlFilledPrints';
+const filledPrints = new Map(); // tabId -> { origin, salt, prints, until }
+let filledLoaded = null;
+
+function loadFilled() {
+  filledLoaded ??= chrome.storage.session.get(FILLED_KEY).then((stored) => {
+    for (const [id, entry] of stored?.[FILLED_KEY] ?? []) if (!filledPrints.has(id)) filledPrints.set(id, entry);
+  }).catch(() => {});
+  return filledLoaded;
+}
+
+function saveFilled() {
+  chrome.storage.session.set({ [FILLED_KEY]: [...filledPrints] }).catch(() => {});
+}
+
+/** Before a fill's values reach the page: their fingerprints, for this tab and origin. */
+async function noteFilled(tabId, origin, values) {
+  await loadFilled();
+  const now = Date.now();
+  let entry = filledPrints.get(tabId);
+  if (!entry || entry.origin !== origin || entry.until < now) {
+    const salt = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+    entry = { origin, salt, prints: [], until: 0 };
+  }
+  for (const value of values) {
+    for (const form of new Set([value, value.trim()])) {
+      if (!form) continue;
+      const print = globalThis.__foxlFilledPrint(entry.salt, form);
+      if (!entry.prints.includes(print)) entry.prints.push(print);
+    }
+  }
+  entry.prints = entry.prints.slice(-24);
+  entry.until = now + FILLED_WINDOW_MS;
+  filledPrints.set(tabId, entry);
+  saveFilled();
+}
+
+/** The fingerprints a read of this tab carries, or null. */
+async function filledFor(tabId) {
+  await loadFilled();
+  const entry = filledPrints.get(tabId);
+  if (!entry) return null;
+  if (entry.until < Date.now()) {
+    filledPrints.delete(tabId);
+    saveFilled();
+    return null;
+  }
+  return { origin: entry.origin, salt: entry.salt, prints: entry.prints.slice() };
+}
+
 async function fillSignIn(tabId, params = {}, deadline) {
   if (!tabId) return { success: false, error: 'fill_sign_in needs a tab' };
   const expectedOrigin = typeof params.expectedOrigin === 'string' ? params.expectedOrigin : '';
@@ -1571,6 +1640,8 @@ async function fillSignIn(tabId, params = {}, deadline) {
   let tabOrigin = '';
   try { tabOrigin = tab?.url ? new URL(tab.url).origin : ''; } catch { tabOrigin = ''; }
   if (tabOrigin !== origin) return { success: false, refused: 'origin', error: `The tab is on ${tabOrigin || 'a page Foxl cannot read'}, not ${origin}, the site the sign-in was saved for. Nothing was typed.` };
+  // Fingerprinted before any value reaches the page, so no read can catch one first (WHAT A SAVED SIGN-IN TYPED).
+  await noteFilled(tabId, origin, fields.map((field) => field.value));
   try {
     const result = await chrome.tabs.sendMessage(tabId, { type: 'FILL_SIGN_IN', expectedOrigin: origin, fields, deadline }, { frameId: 0 });
     return result || { success: false, error: 'No answer from the page' };
@@ -2394,6 +2465,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   clearPageSnapshots(tabId);
   loadHandedTabs().then(() => { if (handedTabs.delete(tabId)) saveHandedTabs(); });
+  loadFilled().then(() => { if (filledPrints.delete(tabId)) saveFilled(); });
   if (tabContexts.has(tabId)) {
     tabContexts.delete(tabId);
     if (focusedTabId === tabId) {

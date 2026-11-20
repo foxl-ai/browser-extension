@@ -346,27 +346,10 @@
             message.filter,
             message.depth,
             message.maxChars,
-            message.refId
+            message.refId,
+            message.filled
           );
           sendResponse({ success: true, data: result });
-        } catch (err) {
-          sendResponse({ success: false, error: err.message });
-        }
-        break;
-
-      case 'CLICK_ELEMENT':
-        try {
-          const result = window.__pilotClickElement?.(message.refId);
-          sendResponse(result || { success: false, error: 'Function not available' });
-        } catch (err) {
-          sendResponse({ success: false, error: err.message });
-        }
-        break;
-
-      case 'TYPE_IN_ELEMENT':
-        try {
-          const result = window.__pilotTypeInElement?.(message.refId, message.text, message.submit);
-          sendResponse(result || { success: false, error: 'Function not available' });
         } catch (err) {
           sendResponse({ success: false, error: err.message });
         }
@@ -412,7 +395,7 @@
             FOCUS_ELEMENT: () => window.__pilotFocusElement?.(message.refId),
             ELEMENT_INFO: () => window.__pilotElementInfo?.(message.refId),
             FOCUS_FOR_TYPING: () => window.__pilotFocusForTyping?.(message.refId),
-            READ_VALUE: () => window.__pilotReadValue?.(message.refId),
+            READ_VALUE: () => window.__pilotReadValue?.(message.refId, message.filled, message.text),
             INSERT_TEXT_FALLBACK: () => window.__pilotInsertTextFallback?.(message.refId, message.text),
             CLICK_FALLBACK: () => window.__pilotClickFallback?.(message.refId),
             CLICK_AT_FALLBACK: () => window.__pilotClickAtFallback?.(message.x, message.y),

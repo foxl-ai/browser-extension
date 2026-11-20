@@ -168,7 +168,7 @@
       // element.type, not the attribute: type="PASSWORD" is a password too. A hidden
       // field's value (a CSRF or session token) is not on screen, so it is never a name,
       // and neither is what a saved sign-in typed (a username, a one-time code).
-      if (!['password', 'hidden'].includes(element.type) && !window.__foxlFilledFields.has(element) && element.value && element.value.length < 50 && element.value.trim()) {
+      if (!['password', 'hidden'].includes(element.type) && !filledBySignIn(element) && element.value && element.value.length < 50 && element.value.trim()) {
         return element.value.trim();
       }
     }
@@ -300,7 +300,34 @@
    * which login-fill-chrome.ts `maskChromeFilled` writes into this extension's lines): change both together.
    */
   const FILLED_BY_FOXL = 'filled-by-foxl';
-  const filledBySignIn = (element) => window.__foxlFilledFields.has(element);
+  /*
+   * AND WHEREVER THE PAGE PUTS IT (foxl-ai/pilot #7859). The element mark is lost when a page draws the field again
+   * as a new element (a framework's re-render, a clone), and the READ_VALUE path (a typing's read-back) never asked
+   * it. So every text read below asks this one check, which also knows the values a saved sign-in typed in this tab
+   * and origin for a while: the service worker sends their salted fingerprints with each read (`filled`:
+   * `{ origin, salt, prints }`, src/content-scripts/filled-print.js), never the values, and a text field whose value
+   * has one reads as `filled-by-foxl` too. `readFilled` is the fingerprints of the read in progress. No other page
+   * handler reads a value back: the two kept for an older service worker (CLICK_ELEMENT, TYPE_IN_ELEMENT) are gone.
+   * A value the page rewrites (another case, a reformatted number) is a different value, and a screenshot is pixels:
+   * it still shows the page as it is drawn.
+   */
+  let readFilled = null;
+  function holdsFilledValue(element) {
+    const f = readFilled;
+    if (!f || f.origin !== location.origin || typeof f.salt !== 'string' || !Array.isArray(f.prints) || !f.prints.length) return false;
+    if (typeof window.__foxlFilledPrint !== 'function') return false;
+    const value = element.value;
+    if (typeof value !== 'string' || !value) return false;
+    return f.prints.includes(window.__foxlFilledPrint(f.salt, value)) || f.prints.includes(window.__foxlFilledPrint(f.salt, value.trim()));
+  }
+  const filledBySignIn = (element) => window.__foxlFilledFields.has(element)
+    || ((element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) && holdsFilledValue(element));
+  /** Runs one read with the fingerprints it was sent (or none), and forgets them after. */
+  function withFilled(filled, read) {
+    const before = readFilled;
+    readFilled = filled && typeof filled === 'object' ? filled : null;
+    try { return read(); } finally { readFilled = before; }
+  }
 
   /*
    * NOT SHOWN, under filter "all" (#6245): that filter lists hidden elements too, and until 0.11.0
@@ -516,7 +543,11 @@
    * @param {string} refId - Focus on specific element by ref ID (optional)
    * @returns {Object} { pageContent, viewport, error? }
    */
-  window.__generateAccessibilityTree = function(filter, depth, maxChars, refId) {
+  window.__generateAccessibilityTree = function(filter, depth, maxChars, refId, filled) {
+    return withFilled(filled, () => generateTree(filter, depth, maxChars, refId));
+  };
+
+  function generateTree(filter, depth, maxChars, refId) {
     try {
       const output = [];
       const maxDepth = depth ?? 15;
@@ -589,7 +620,7 @@
     } catch (err) {
       throw new Error('Error generating accessibility tree: ' + (err.message || 'Unknown error'));
     }
-  };
+  }
 
   /*
    * ONE ELEMENT'S WHOLE TEXT, A SLICE AT A TIME (#6245), so a long text the tree line cut (a
@@ -600,7 +631,11 @@
    * exactly as the page holds it (whitespace kept). `hidden` says when the element is not shown.
    */
   const READ_TEXT_MAX = 20000;
-  window.__pilotReadText = function(refId, offset = 0, maxChars = 4000) {
+  window.__pilotReadText = function(refId, offset = 0, maxChars = 4000, filled = null) {
+    return withFilled(filled, () => readText(refId, offset, maxChars));
+  };
+
+  function readText(refId, offset, maxChars) {
     const element = window.__pilotGetElement(refId);
     if (!element || isFoxlUi(element)) return notFound(refId);
     const field = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement;
@@ -637,7 +672,7 @@
       nextOffset: end < full.length ? end : null,
       hidden: hiddenReason(element),
     };
-  };
+  }
 
   /**
    * Get element by ref ID
@@ -757,14 +792,23 @@
     return { success: true, password: el instanceof HTMLInputElement && el.type === 'password' };
   };
 
-  /** What the field holds now. A password's value is never returned, only its length. */
-  window.__pilotReadValue = function(refId) {
-    const el = window.__pilotGetElement(refId);
-    if (!el) return notFound(refId);
-    const value = textFieldValue(el);
-    if (value === null) return { success: false, error: `Element ${refId} is not a text field` };
-    const password = el instanceof HTMLInputElement && el.type === 'password';
-    return { success: true, value: password ? null : value, length: value.length, password };
+  /**
+   * What the field holds now. A password's value is never returned, only its length, and neither is what a saved
+   * sign-in typed (FILLED_BY_FOXL above): then `filled` is true, and `holds` answers whether it holds `text` (the
+   * typing being read back), so the read-back never needs the value.
+   */
+  window.__pilotReadValue = function(refId, filled = null, text = null) {
+    return withFilled(filled, () => {
+      const el = window.__pilotGetElement(refId);
+      if (!el) return notFound(refId);
+      const value = textFieldValue(el);
+      if (value === null) return { success: false, error: `Element ${refId} is not a text field` };
+      const password = el instanceof HTMLInputElement && el.type === 'password';
+      if (!password && filledBySignIn(el)) {
+        return { success: true, value: null, length: value.length, password, filled: true, holds: typeof text === 'string' ? holdsText(value, text) : null };
+      }
+      return { success: true, value: password ? null : value, length: value.length, password };
+    });
   };
 
   /**
@@ -1012,23 +1056,6 @@
     else form.submit();
     form.removeEventListener('submit', seen, { capture: true });
     return { ...result, submitted: sawSubmit };
-  };
-
-  /** Kept for an older service worker: the improved synthetic click. */
-  window.__pilotClickElement = function(refId) {
-    return window.__pilotClickFallback(refId);
-  };
-
-  /** Kept for an older service worker: insert, verify, then Enter through requestSubmit. */
-  window.__pilotTypeInElement = function(refId, text, submit = false) {
-    const typed = window.__pilotInsertTextFallback(refId, text);
-    if (!typed.success) return typed;
-    const read = window.__pilotReadValue(refId);
-    if (read.success && !read.password && !holdsText(read.value, text)) {
-      return { success: false, error: `Typed into ${refId}, but it now holds ${JSON.stringify((read.value || '').slice(0, 200))}.` };
-    }
-    if (submit) window.__pilotKeyFallback('Enter', refId);
-    return { success: true, method: typed.method };
   };
 
   /**
