@@ -33,7 +33,7 @@ about them is more useful than a reassuring summary:
 | The URLs and titles of the tabs Foxl works in (your other tabs only as a count) | So a task can move between sites and the agent knows where it is | The configured Foxl server |
 | Your side-panel messages and recent replies | To answer your request and follow-up questions | The configured Foxl server |
 | Actions the agent performs: clicks, typed text, navigation | They are the work itself | Performed in your browser |
-| After a click or key press that sent a form or loaded a page: the page's title, first heading and first 300 characters of text, and the form's address, its button's words and up to eight of its answers (its choices, such as boxes ticked, options, amounts and dates, or its words when it has no choices; its stable hidden fields such as a product id, never a per-load token; never a form with a password field, and never a sign-in step: a username, a current password or a one-time code) | So Foxl knows what the step did before it reads the page, and does not send the same form twice by mistake | The configured Foxl server, and that site's own session storage in that tab (below) |
+| After a click or key press that sent a form or loaded a page: the page's title, first heading and first 300 characters of text, and the form's address, its button's words and up to eight of its answers (its choices, such as boxes ticked, options, amounts and dates, or its words when it has no choices; its stable hidden fields such as a product id, never a per-load token; never a form with a password field, and never a sign-in step: a username, a current password or a one-time code) | So Foxl knows what the step did before it reads the page, and does not send the same form twice by mistake | The configured Foxl server, and the extension's own session storage (below) |
 | A sign-in you saved in Foxl Desktop (its username, password or one-time code), only when Foxl signs you in to that site in your own Chrome (0.12.1) | So a task can sign in to the site you asked about without you typing it again | Received from the configured Foxl server and typed into that site's own page, in the tab's top document only and only while the page is on the site the sign-in was saved for. It is never stored by the extension, never sent anywhere else, and no answer to the server carries it. So that no later text read shows it, even where the page draws the field again with the same value (a screenshot still shows the page as it is drawn), the extension holds a salted fingerprint of each value (never the value) in Chrome's session memory for ten minutes |
 | Your settings: the server URL and appearance preference | So you do not re-enter them | `chrome.storage.local`, on your machine only |
 
@@ -104,9 +104,10 @@ Screenshots pass through the extension without being written to disk by it.
 Settings persist in `chrome.storage.local`; removing the extension deletes those.
 
 When one of the agent's clicks or key presses sends a form, its description (as above)
-and a short key for the Foxl chat are kept in that site's own session storage, in that
-tab, so the next step there can still report a form whose answer Foxl did not see. The
-next step in that tab on that site removes it, and closing the tab does too.
+and a short key for the Foxl chat are kept in the extension's own session storage, for that
+tab and site, so the next step there can still report a form whose answer Foxl did not see.
+The site's own page cannot read it. The next step in that tab on that site removes it, and
+closing the tab or the browser does too.
 
 The visible side-panel conversation stays in that panel's memory. Follow-up
 requests include up to 20 recent messages within a 32 KB text budget. New chat or

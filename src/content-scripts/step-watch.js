@@ -32,8 +32,9 @@
  * handlers run and reported as `blocked`. Only a submit during Foxl's own step is looked at, so a form the
  * person sends is never described or stopped.
  *
- * A step whose answer was never read (the desktop gave up on it) leaves its form in `sessionStorage` (this
- * chat only, same origin, half an hour): the next arm on that site returns it as `leftover` and holds it.
+ * A step whose answer was never read (the desktop gave up on it) leaves its form with the service worker, in extension
+ * storage keyed by tab and origin (this chat only, half an hour): the next arm on that site returns it as `leftover` and
+ * holds it. Nothing of it is in the page (foxl-ai/pilot #7925).
  */
 (() => {
   if (window.__foxlStepWatch) return;
@@ -44,7 +45,6 @@
   const STEP_QUIET_MS = 300;
   const STEP_QUIET_MAX_MS = 1500;
   const STEP_HOLD_WINDOW_MS = 10000;
-  const STEP_LEFTOVER_MS = 30 * 60000;
   const SENT_KEY = '__foxlStepSent';
 
   // The page's description of a submitted POST form, or null (a GET form, a sign-in, nothing in it).
@@ -138,9 +138,10 @@
     try { document.dispatchEvent(new CustomEvent('foxl-step-requests', { detail: on ? `watch ${formOrigin}` : 'unwatch' })); } catch { /* no document */ }
   };
 
-  const writeSent = (o) => { try { sessionStorage.setItem(SENT_KEY, JSON.stringify(o)); } catch { /* the answer cannot carry it */ } };
-  // Read, never taken: the next arm takes the record (and the desktop records it only when it has none).
-  const peekSent = () => { try { const v = sessionStorage.getItem(SENT_KEY); return v ? JSON.parse(v) : null; } catch { return null; } };
+  // The record goes to the service worker (STEP_SENT), which keeps it by this tab and this page's origin, out of the
+  // page's reach. An earlier build kept it in the page's sessionStorage under SENT_KEY: what is left there is removed.
+  const writeSent = (o) => { try { chrome.runtime.sendMessage({ type: 'STEP_SENT', record: o }).catch(() => {}); } catch { /* the answer cannot carry it */ } };
+  try { sessionStorage.removeItem(SENT_KEY); } catch { /* no storage here */ }
   const markCounted = (sub) => { if (!sub || sub.counted) return; sub.counted = true; if (sub.info) writeSent({ info: sub.info, chat: sub.chat, at: sub.at, counted: true }); };
 
   // A page load to come. A same-document navigation (history.pushState, a single-page app's view) never unloads the page.
@@ -220,28 +221,25 @@
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // The step ends when it is read: its hold, the watch on submits and the request count end with it.
   const end = () => { s.armedAt = 0; s.hold = new Set(); watchRequests(false); observe(false); };
-  const answered = (chat) => {
-    const o = peekSent();
-    return { success: true, phase: 'done', settled: 'answered', navigated: true, newDocument: true, submitted: o && o.chat === chat ? formOf(o.info) : null, page: page() };
-  };
-  // The record sits in the page's own storage, which the page can write too: only describe's shape and sizes leave it,
-  // so what the desktop quotes from it (NOT_SENT_AGAIN) is never longer than a real description.
+  // A step read in the page it led to: what it sent is the service worker's record for this tab and origin, which it
+  // fills in itself (`fromRecord`; read, never taken: the next arm takes it, and the desktop records it only when it has none).
+  const answered = () => ({ success: true, phase: 'done', settled: 'answered', navigated: true, newDocument: true, submitted: null, fromRecord: true, pageOrigin: location.origin, page: page() });
+  // Only describe's shape and sizes leave a record, so what the desktop quotes from it (NOT_SENT_AGAIN) is never longer
+  // than a real description.
   const formOf = (i) => {
     if (!i || typeof i !== 'object' || typeof i.digest !== 'string' || !/^[0-9a-f]{16}$/.test(i.digest)) return null;
     const str = (v, n) => (typeof v === 'string' ? v : '').slice(0, n);
     return { digest: i.digest, host: str(i.host, 255), action: str(i.action, 2048), label: str(i.label, 80), summary: Array.isArray(i.summary) ? i.summary.slice(0, 8).map((l) => str(l, 200)) : [] };
   };
 
-  /** Arms the page before a step; `hold` is the digests the desktop's chat already sent, `chat` its key. */
-  window.__foxlStepArm = function stepArm(hold, chat) {
+  /**
+   * Arms the page before a step; `hold` is the digests the desktop's chat already sent, `chat` its key, and `leftover` the
+   * form a stopped step of this chat sent on `leftoverOrigin` (the service worker's record, checked there for the chat,
+   * that it was sent and its age), used only on that origin.
+   */
+  window.__foxlStepArm = function stepArm(hold, chat, sent = null, sentOrigin = '') {
     const key = String(chat || '');
-    let leftover = null;
-    try {
-      const v = sessionStorage.getItem(SENT_KEY);
-      sessionStorage.removeItem(SENT_KEY);
-      const o = v ? JSON.parse(v) : null;
-      if (o && key && o.chat === key && o.counted && o.info && Date.now() - o.at >= 0 && Date.now() - o.at < STEP_LEFTOVER_MS) leftover = formOf(o.info);
-    } catch { /* no storage here */ }
+    const leftover = sent && sentOrigin === location.origin ? formOf(sent) : null;
     watchRequests(false);
     observe(true);
     s.armedAt = Date.now();
@@ -259,7 +257,7 @@
 
   /** What the step did, at once. A step that sent no form is done; a form is reported before any waiting. */
   window.__foxlStepLook = function stepLook(origin, chat) {
-    if (origin !== performance.timeOrigin) return answered(chat);
+    if (origin !== performance.timeOrigin) return answered();
     if (s.blocked) { const blocked = s.blocked; end(); return { success: true, phase: 'done', settled: 'blocked', blocked }; }
     const sub = s.submit;
     // A link the page intercepts (a transition in this document) is the page's own change, not a page load.
@@ -270,7 +268,7 @@
 
   /** For a form being sent: waits until its answer starts (a page load), or the page's own requests are answered and drawn. */
   window.__foxlStepSettle = async function stepSettle(origin, chat) {
-    if (origin !== performance.timeOrigin) return answered(chat);
+    if (origin !== performance.timeOrigin) return answered();
     const sub = s.submit;
     if (!sub) return { success: true, settled: 'nothing' };
     const started = Date.now();

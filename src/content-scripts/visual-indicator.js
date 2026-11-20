@@ -415,7 +415,7 @@
        */
       case 'STEP_ARM':
         try {
-          sendResponse(window.__foxlStepArm?.(message.hold, message.chat) || { success: false, error: 'Function not available' });
+          sendResponse(window.__foxlStepArm?.(message.hold, message.chat, message.leftover, message.leftoverOrigin) || { success: false, error: 'Function not available' });
         } catch (err) {
           sendResponse({ success: false, error: err.message });
         }
