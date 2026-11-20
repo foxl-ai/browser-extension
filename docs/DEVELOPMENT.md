@@ -22,7 +22,7 @@ Use these debugging surfaces:
 | Content scripts | The page's DevTools console |
 | Connection | The extension's options page and its connection test |
 
-The server URL defaults to the desktop app's local ports. A custom server URL is persisted in `chrome.storage.local`; clear it in the options page to return to discovery.
+The server URL defaults to the desktop app's local ports. A custom server URL (`localhost`, `127.0.0.1` or `[::1]` only, `src/server-url.js`) is persisted in `chrome.storage.local`; clear it in the options page to return to discovery. A stored address for any other host is not used: discovery runs, and the options page says so.
 
 ## Background capture and snapshot protocol (0.9)
 

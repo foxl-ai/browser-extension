@@ -26,7 +26,7 @@ That sentence is the whole justification for `<all_urls>`, so do not soften it i
 
 Lead with the prerequisite. Most people who install a browser extension do not have
 a desktop app, and this one talks to a local websocket by default (port 13847,
-then 3847). The options can override that server URL. Somebody without a Foxl
+then 3847). The options can set another local port. Somebody without a Foxl
 server has nothing to connect to. The
 extension says this in its side panel now, and the listing must say it too.
 
@@ -59,7 +59,7 @@ Make yourself at home
 Where your data goes
 - Your messages, recent replies, and the page content or screenshots needed for
   your task go to your configured Foxl server, on your computer by default.
-  A custom server URL changes that destination.
+  A custom server URL can name another port on this computer, never another computer.
 - Foxl Desktop manages the model connection and decides what context to send.
   Model and service settings are managed in the Desktop app.
 - This extension has no analytics, no advertising SDK and no third-party identifier.

@@ -130,7 +130,7 @@ Screenshots capture a background tab without selecting it, including a chosen re
 
 ## Where your data goes
 
-**By default, extension traffic goes to Foxl on your computer.** It discovers `http://localhost:13847`, with `http://localhost:3847` as the fallback. The options page can override that server URL; a custom endpoint changes where extension data is sent.
+**Extension traffic goes to Foxl on your computer.** It discovers `http://localhost:13847`, with `http://localhost:3847` as the fallback. The options page can set another port on this computer (`localhost`, `127.0.0.1` or `[::1]`); it refuses any other address, and an address an earlier version saved for another computer is not used.
 
 Page text, screenshots, tab URLs and titles, the file names, sizes and states of downloads a Foxl task tab started (once you allow download receipts), and chat requests can pass to that configured server. Foxl Desktop may then send task context to your chosen model provider or connected service. Local transport between Chrome and Desktop does not mean every part of the task stays on your computer.
 
@@ -216,6 +216,7 @@ While Foxl captures a background tab, or draws one after scrolling it, Chrome sh
 | [src/message-text.js](src/message-text.js) | Safe rendering of message paragraphs, lists, code, and links |
 | [src/theme.js](src/theme.js) · [styles/foxl.css](styles/foxl.css) | Shared Foxl typography, colors, and appearance |
 | [src/options.js](src/options.js) · [options.html](options.html) | Appearance, connection checks, and shortcuts |
+| [src/server-url.js](src/server-url.js) | Where the extension may connect: Foxl Desktop on this computer only |
 | [scripts/](scripts/) | Source audit, unit tests, reproducible packaging, and icon generation |
 | [store/](store/) | Real store captures, artwork, and review evidence |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |

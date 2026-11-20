@@ -203,7 +203,9 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
       headless: true,
       // Playwright turns Chrome's pop-up blocker off by default; a blocked pop-up is under test here.
       ignoreDefaultArgs: ['--disable-popup-blocking'],
-      args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
+      // No name resolves but localhost and 127.0.0.1 (the rules map an IP literal too, measured), so nothing a test
+      // types (desktop.example) leaves this computer.
+      args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`, '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1'],
       acceptDownloads: true,
       env: { ...process.env, XDG_CONFIG_HOME: config },
     });

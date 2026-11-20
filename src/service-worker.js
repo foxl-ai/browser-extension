@@ -11,6 +11,7 @@
 import { createInputQueue } from './input-queue.js';
 import { captureTabScreenshot, readAllowedPage } from './page-capture.js';
 import { getPageSnapshot, clearPageSnapshots } from './page-snapshot.js';
+import { loopbackServerUrl } from './server-url.js';
 
 // Configuration - try production port first, then dev
 const SERVER_PORTS = [13847, 3847];
@@ -149,10 +150,12 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
  * Get server URL from storage, or auto-discover by probing ports
  */
 async function getServerUrl() {
-  // User explicitly set a URL - always use it
+  // An address the person set, when it is on this computer (src/server-url.js, foxl-ai/pilot #7806). One an
+  // earlier build stored for another host is never used: discovery runs instead, and the options page says so.
   const result = await chrome.storage.local.get(['serverUrl']);
-  if (result.serverUrl) {
-    return result.serverUrl;
+  const saved = loopbackServerUrl(result.serverUrl);
+  if (saved) {
+    return saved;
   }
 
   // Return cached discovery if still valid
@@ -1937,7 +1940,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Read here rather than in the panel so both surfaces (side panel, options)
         // get the same answer from one place - and it is a DATED question now, so the
         // memory expires instead of pinning a former user to "reconnecting" forever.
-        const stored = await chrome.storage.local.get(['everConnected', 'lastConnectedAt']).catch(() => ({}));
+        const stored = await chrome.storage.local.get(['everConnected', 'lastConnectedAt', 'serverUrl']).catch(() => ({}));
         const nowMs = Date.now();
         const seenDesktop = hasRecentDesktop(stored, nowMs);
         // Make an undatable record datable, so it can expire like any other. Fire and
@@ -1955,6 +1958,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           desktopRequiresBridge: !wsConnected && desktopRequiresBridge,
           everConnected: seenDesktop,
           serverUrl: await getServerUrl(),
+          // A saved address that is not on this computer, which getServerUrl does not use (src/server-url.js).
+          serverUrlIgnored: Boolean(stored.serverUrl) && !loopbackServerUrl(stored.serverUrl),
           extensionVersion: chrome.runtime.getManifest().version,
           desktopVersion,
           desktopTooOld: desktopIsTooOld(),
