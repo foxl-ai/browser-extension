@@ -1,6 +1,7 @@
 /**
  * Foxl Options Page Script
  */
+import { loopbackServerUrl, serverUrlHost } from './server-url.js';
 
 const serverUrlInput = document.getElementById('serverUrl');
 const saveButton = document.getElementById('saveButton');
@@ -95,11 +96,24 @@ if (openShortcutsBtn) {
   openShortcutsBtn.addEventListener('click', openShortcutsTab);
 }
 
+/*
+ * A saved address that is not on this computer (an earlier build accepted any): the service worker does not use it
+ * and finds Foxl Desktop on its own ports (src/server-url.js), and the field says so.
+ */
+const serverUrlHint = document.getElementById('serverUrlHint');
+const defaultServerUrlHint = serverUrlHint.textContent;
+function showIgnoredServerUrl(saved) {
+  const hint = serverUrlHint;
+  const host = serverUrlHost(saved);
+  hint.textContent = `The saved address${host ? ` (${host})` : ''} is not on this computer, so Foxl did not use it and finds Foxl Desktop on its own. Clear it, or save a localhost address.`;
+}
+
 // Load saved settings
 chrome.storage.local.get(['serverUrl', 'appearance'], (result) => {
   if (result.serverUrl) {
     serverUrlInput.value = result.serverUrl;
     document.getElementById('advancedConnection').open = true;
+    if (!loopbackServerUrl(result.serverUrl)) showIgnoredServerUrl(result.serverUrl);
   }
   document.getElementById('appearance').value = result.appearance || 'system';
   // If no saved URL, leave empty (auto-detect mode)
@@ -166,21 +180,28 @@ function showMessage(text, type) {
 // Save settings
 saveButton.addEventListener('click', async () => {
   serverUrlInput.setCustomValidity('');
-  if (serverUrlInput.value.trim() && !/^https?:\/\//i.test(serverUrlInput.value.trim())) {
-    serverUrlInput.setCustomValidity('Use an http:// or https:// server URL.');
+  const typed = serverUrlInput.value.trim();
+  // Foxl Desktop on this computer only (src/server-url.js): any other host is refused by name.
+  const serverUrl = typed ? loopbackServerUrl(typed) : '';
+  if (typed && !serverUrl) {
+    const host = /^https?:\/\//i.test(typed) ? serverUrlHost(typed) : null;
+    serverUrlInput.setCustomValidity(host
+      ? `${host} is not this computer. Foxl connects only to Foxl Desktop here: use localhost, 127.0.0.1 or [::1], for example http://localhost:13847.`
+      : 'Use an http:// or https:// address on this computer, for example http://localhost:13847.');
   }
   if (!serverUrlInput.reportValidity()) return;
-  const serverUrl = serverUrlInput.value.trim();
   saveButton.disabled = true;
 
   try {
     if (serverUrl) {
       await chrome.storage.local.set({ serverUrl });
+      serverUrlInput.value = serverUrl;
       showMessage('Connection saved. Reconnecting…', 'success');
     } else {
       await chrome.storage.local.remove('serverUrl');
       showMessage('Connection saved. Finding Foxl Desktop…', 'success');
     }
+    serverUrlHint.textContent = defaultServerUrlHint;
     
     // Reconnect with new URL
     await chrome.runtime.sendMessage({ type: 'CONNECT_TO_SERVER' });

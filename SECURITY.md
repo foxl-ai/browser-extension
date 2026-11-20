@@ -47,7 +47,7 @@ branches; fixes ship as a new version.
 Stated here so a deviation is reportable as a bug rather than a design question:
 
 - It makes no network request to any host other than the Foxl server URL, which
-  defaults to `http://localhost:13847`.
+  is always on this computer (`http://localhost:13847` unless you set another local port).
 - It executes no remotely hosted code. No `eval`, no injected script tags, no
   WebAssembly.
 - It stores nothing outside `chrome.storage.local`, and syncs nothing.
