@@ -68,17 +68,41 @@ export const itemName = (publisherId, extensionId) => {
   return `publishers/${publisherId}/items/${extensionId}`;
 };
 
+/*
+ * AN UPLOAD IS DONE ONLY WHEN THE STORE NAMES THE VERSION THE RELEASE BUILT (foxl-ai/pilot #7923). The upload's own
+ * answer carries `crxVersion`, the version the store read from THIS package (every release so far answered
+ * synchronously, `uploadState=SUCCEEDED crxVersion=0.12.2` and `=0.14.0` in their logs), and it must equal the
+ * release's. A SUCCEEDED that names no version, or no expected version to hold it to, confirms nothing.
+ */
 /** An upload's answer: done, still processing, or a failure that names why. */
 export function decideUpload(body, expectedVersion) {
   const state = body && body.uploadState;
+  if (body && body.crxVersion && expectedVersion && body.crxVersion !== expectedVersion) {
+    return { ok: false, why: `the store read version ${body.crxVersion} from the package, expected ${expectedVersion}` };
+  }
   if (state === 'SUCCEEDED') {
-    if (expectedVersion && body.crxVersion && body.crxVersion !== expectedVersion) {
-      return { ok: false, why: `the store read version ${body.crxVersion} from the package, expected ${expectedVersion}` };
+    if (!expectedVersion || body.crxVersion !== expectedVersion) {
+      return { ok: false, why: `the store answered SUCCEEDED without naming the version it read${expectedVersion ? `, so the package is not confirmed as ${expectedVersion}` : ''}` };
     }
     return { ok: true, done: true };
   }
   if (state === 'IN_PROGRESS') return { ok: true, done: false };
   return { ok: false, why: `uploadState=${state === undefined ? '(missing)' : state}` };
+}
+
+/*
+ * AN UPLOAD THE STORE FINISHES ASYNCHRONOUSLY IS NEVER SUBMITTED from here. fetchStatus says how it went only in
+ * `lastAsyncUploadState`, which is the ITEM's last asynchronous upload (an earlier one's SUCCEEDED reads the same),
+ * and it names no version for a draft. So nothing confirms that the draft is this release's package: the step
+ * waits to report how the upload ended, then fails, leaving the draft unsubmitted for a person to check.
+ */
+export function decideAsyncUpload(status) {
+  const state = status && status.lastAsyncUploadState;
+  if (state === 'IN_PROGRESS') return { ok: true, done: false };
+  if (state === 'SUCCEEDED') {
+    return { ok: false, why: 'the store finished the upload asynchronously and named no version, so this package is not confirmed as the release\'s: it stays a draft, not submitted. Check the draft\'s version in the Developer Dashboard and submit it there' };
+  }
+  return { ok: false, why: `lastAsyncUploadState=${state === undefined ? '(missing)' : state}` };
 }
 
 /** A submit's answer. Anything but a state that leads to (or is) a published item fails the step. */
@@ -145,11 +169,12 @@ async function main() {
     const answer = await call('POST', `${API}/upload/v2/${name}:upload`, token, readFileSync(zip), 'application/zip');
     let d = decideUpload(answer, version);
     console.log(`upload: uploadState=${answer.uploadState} crxVersion=${answer.crxVersion ?? '?'}`);
-    // IN_PROGRESS: poll fetchStatus's lastAsyncUploadState, as the reference says, for up to 5 minutes.
+    // IN_PROGRESS: poll fetchStatus's lastAsyncUploadState, as the reference says, for up to 5 minutes, to say how it
+    // ended; an asynchronous upload is never confirmed as this version (decideAsyncUpload), so it is never submitted.
     for (let i = 0; d.ok && !d.done && i < 60; i++) {
       await new Promise((r) => setTimeout(r, 5000));
       const s = await status();
-      d = decideUpload({ uploadState: s.lastAsyncUploadState }, null);
+      d = decideAsyncUpload(s);
       console.log(`upload: lastAsyncUploadState=${s.lastAsyncUploadState}`);
     }
     if (!d.ok) throw new Error(`the store did not take the package: ${d.why}`);
