@@ -1026,9 +1026,18 @@ function stoppedRefusal(action) {
  */
 async function executeBrowserCommand(command) {
   const { action, tabId, params, deadline } = command;
-  const targetTabId = await resolveTargetTab(tabId);
+  let targetTabId = await resolveTargetTab(tabId);
   // Only in Foxl's own tabs (FOXL ACTS ONLY IN ITS OWN TABS, above), before anything reaches the tab.
   if (!TABLESS_ACTIONS.has(action) && targetTabId != null && !(await isFoxlTab(targetTabId))) return notFoxlTab(targetTabId);
+  // No tab named and none of Foxl's to fall back on: 0.8.1 captured the selected tab of the current window
+  // (captureVisibleTab(null)), and Foxl Desktop sends no tabId when the model omits it. That tab is captured
+  // only when it is Foxl's own.
+  if (action === 'screenshot' && targetTabId == null) {
+    const active = (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]?.id;
+    if (active == null) return { success: false, error: 'No tab to capture.' };
+    if (!(await isFoxlTab(active))) return notFoxlTab(active);
+    targetTabId = active;
+  }
   // A web page only (WHERE A TAB MAY GO), refused before the step is noted or any tab changes.
   if (action === 'navigate' || action === 'new_tab') {
     const to = navigableUrl(params?.url, { required: action === 'navigate' });
@@ -1037,6 +1046,18 @@ async function executeBrowserCommand(command) {
   // A navigation to a file downloads from the site it names, so it is remembered with that one.
   if (targetTabId && (INPUT_ACTIONS.has(action) || action === 'navigate')) await noteActed(targetTabId, action === 'navigate' ? params?.url : null);
 
+  // The tab shows that Foxl is acting while this runs (WHILE FOXL ACTS IN A TAB, THAT TAB SAYS SO).
+  const overlayTab = OVERLAY_ACTIONS.has(action) && targetTabId != null ? targetTabId : null;
+  if (overlayTab != null) beginActing(overlayTab);
+  try {
+    return await dispatchBrowserCommand({ action, targetTabId, params, deadline });
+  } finally {
+    if (overlayTab != null) endActing(overlayTab);
+  }
+}
+
+/** The command itself, once executeBrowserCommand has checked where it may act. */
+async function dispatchBrowserCommand({ action, targetTabId, params, deadline }) {
   try {
     // 0.12.0 (foxl-ai/pilot #6394): a click or a key press that sends a form is watched until its answer starts.
     const watched = targetTabId && stepWatched(action, params) ? await armStep(targetTabId, params?.hold, params?.chat) : null;
@@ -1158,19 +1179,9 @@ async function executeBrowserCommand(command) {
         }
         return { success: true, contexts: ctxList, focusedTabId };
 
-      case 'screenshot': {
-        // No target tab known: 0.8.1 captured the selected tab of the current window
-        // (captureVisibleTab(null)), and Foxl Desktop sends no tabId when the model omits it. That
-        // tab is captured only when it is Foxl's own.
-        let shotTabId = targetTabId;
-        if (shotTabId == null) {
-          const active = (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]?.id;
-          if (active == null) return { success: false, error: 'No tab to capture.' };
-          if (!(await isFoxlTab(active))) return notFoxlTab(active);
-          shotTabId = active;
-        }
-        return await captureTabScreenshot(shotTabId, params);
-      }
+      case 'screenshot':
+        // With no tab named, the selected tab when it is Foxl's (executeBrowserCommand).
+        return await captureTabScreenshot(targetTabId, params);
         
       case 'scroll':
         return await scrollPage(targetTabId, params.direction, params.amount);
@@ -2154,32 +2165,75 @@ async function openSidePanel(tabId) {
   }
 }
 
+/*
+ * WHILE FOXL ACTS IN A TAB, THAT TAB SAYS SO (foxl-ai/pilot #7804). The extension raises the overlay (the glow and
+ * the Stop Foxl button, visual-indicator.js) itself for every command that acts in or captures a tab
+ * (OVERLAY_ACTIONS), for as long as the command runs.
+ * The desktop's show keeps it up between commands, as before; its hide (and the person's Stop) takes effect at
+ * once when no command is running on that tab, else when the last one ends. A command the desktop did not ask
+ * the overlay for clears it OVERLAY_GRACE_MS after it ends, so the next command or the desktop's own show,
+ * which follows every command, finds it still up. The screenshot itself still leaves it out (page-capture.js).
+ * Messages to the page are not awaited: a page held by a dialog never holds a command here.
+ */
+const OVERLAY_ACTIONS = new Set(['get_accessibility_tree', 'read_text', 'screenshot', 'click', 'type', 'fill_sign_in', 'click_at', 'press_key', 'hover', 'select', 'navigate', 'scroll']);
+const OVERLAY_GRACE_MS = 800;
+const overlayWanted = new Set(); // tabs the desktop asked to show the overlay on
+const commandsActing = new Map(); // tabId -> commands running on it
+const overlayHideTimers = new Map(); // tabId -> the grace timer of a pending hide
+
+function overlayMessage(tabId, type) {
+  chrome.tabs.sendMessage(tabId, { type }).catch(() => { /* no page script there (yet): nothing to show */ });
+}
+
+function cancelOverlayHide(tabId) {
+  clearTimeout(overlayHideTimers.get(tabId));
+  overlayHideTimers.delete(tabId);
+}
+
+/** A command that acts in or captures this tab starts: the overlay is up while it runs. */
+function beginActing(tabId) {
+  cancelOverlayHide(tabId);
+  const n = (commandsActing.get(tabId) || 0) + 1;
+  commandsActing.set(tabId, n);
+  if (n === 1) overlayMessage(tabId, 'SHOW_AGENT_INDICATORS');
+}
+
+/** It ended: the overlay stays while another runs or the desktop wants it, else goes after the grace. */
+function endActing(tabId) {
+  const n = (commandsActing.get(tabId) || 1) - 1;
+  if (n > 0) { commandsActing.set(tabId, n); return; }
+  commandsActing.delete(tabId);
+  // A navigation replaced the page, and the overlay with it: the desktop's overlay is put back.
+  if (overlayWanted.has(tabId)) { overlayMessage(tabId, 'SHOW_AGENT_INDICATORS'); return; }
+  cancelOverlayHide(tabId);
+  overlayHideTimers.set(tabId, setTimeout(() => {
+    overlayHideTimers.delete(tabId);
+    if (!commandsActing.get(tabId) && !overlayWanted.has(tabId)) overlayMessage(tabId, 'HIDE_AGENT_INDICATORS');
+  }, OVERLAY_GRACE_MS));
+}
+
 /**
- * Show agent indicators on tab
+ * Show agent indicators on tab (the desktop's `show_indicators`)
  */
 async function showAgentIndicators(tabId) {
   const targetTabId = tabId || focusedTabId;
   if (!targetTabId) return;
-
-  try {
-    await chrome.tabs.sendMessage(targetTabId, { type: 'SHOW_AGENT_INDICATORS' });
-  } catch (err) {
-    console.error('[Foxl] Failed to show indicators:', err);
-  }
+  overlayWanted.add(targetTabId);
+  cancelOverlayHide(targetTabId);
+  overlayMessage(targetTabId, 'SHOW_AGENT_INDICATORS');
 }
 
 /**
- * Hide agent indicators on tab
+ * Hide agent indicators on tab (the desktop's `hide_indicators`, the side panel's answer, the person's Stop):
+ * at once when no command runs on it, else when the last one ends.
  */
 async function hideAgentIndicators(tabId) {
   const targetTabId = tabId || focusedTabId;
   if (!targetTabId) return;
-
-  try {
-    await chrome.tabs.sendMessage(targetTabId, { type: 'HIDE_AGENT_INDICATORS' });
-  } catch (err) {
-    console.error('[Foxl] Failed to hide indicators:', err);
-  }
+  overlayWanted.delete(targetTabId);
+  if (commandsActing.get(targetTabId)) return;
+  cancelOverlayHide(targetTabId);
+  overlayMessage(targetTabId, 'HIDE_AGENT_INDICATORS');
 }
 
 // Event Listeners

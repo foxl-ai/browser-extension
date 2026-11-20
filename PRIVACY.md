@@ -124,11 +124,10 @@ Anything the desktop app retains after receiving this data is covered by
   access to all sites because an agent limited to a fixed list cannot run your
   errands, but you are not obliged to grant it.
 - **See when it acts.** The tabs the agent opens sit in their own tab group
-  named "Foxl", and an element it clicks is briefly outlined. A border around
-  the page and a **Stop Foxl** button appear while it works only when the Foxl
-  Desktop app tells the extension that a run is under way. Desktop versions
-  that do not send that signal leave them off, so with those versions the agent
-  can type and click on a page without the border showing.
+  named "Foxl", and an element it clicks is briefly outlined. While the agent
+  reads, captures, types into or clicks on a page, a border around the page and a
+  **Stop Foxl** button show on it, whatever the desktop app sends (since 0.14.1);
+  between those steps they stay while the desktop app says a run is under way.
 - **Cut the connection.** Quit the desktop app. With nothing listening on
   its configured server, the extension receives no new task commands.
 - **Stop a task.** Pressing **Stop Foxl** on a page tells Foxl Desktop to stop that
