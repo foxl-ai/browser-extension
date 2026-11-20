@@ -50,7 +50,7 @@ Stated here so a deviation is reportable as a bug rather than a design question:
   is always on this computer (`http://localhost:13847` unless you set another local port).
 - It executes no remotely hosted code. No `eval`, no injected script tags, no
   WebAssembly.
-- It stores nothing outside `chrome.storage.local`, and syncs nothing.
+- It stores nothing outside `chrome.storage.local` and `chrome.storage.session` (this browser session's memory, which no page can read), and syncs nothing.
 - It reads no cookies and intercepts no network traffic. It has neither the
   `cookies` nor the `webRequest` permission.
 - Its `debugger` permission could do both, so its use is bounded here too: it
