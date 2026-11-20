@@ -163,6 +163,8 @@ A field `fill_sign_in` typed into reads `value="filled-by-foxl"` in `get_accessi
 
 A command acts only in a tab that is Foxl's: one Foxl opened (`new_tab`, or a `navigate` that had no tab), one in the Foxl tab group (a person can move a tab there), the tab the person is on when they send a message from Foxl's side panel, and what one of those opens: a link's new tab joins the Foxl group by itself, and a pop-up window one of them opened (a sign-in pop-up) counts by its `openerTabId`. Any other tab id is answered `{ success: false, notFoxlTab: true, nothingWasDone: true, tabId, error }` and nothing reaches the tab. `switch_tab` focuses only Foxl's tabs, `add_to_group` and `navigate` never adopt another tab, and a `screenshot` with no tab captures the selected tab only when it is Foxl's. `get_tabs` lists only Foxl's tabs; every other tab is counted in `otherTabs` (additive), never named by its URL or title.
 
+`navigate` and `new_tab` open an `http://` or `https://` page, or `about:blank` (a `new_tab` with no url). Any other address (`file:`, `data:`, `blob:`, `view-source:`, a browser page, a relative or scheme-less one) is answered `{ success: false, nothingWasDone: true, error }` before a tab is created or changed.
+
 ## Audit and build
 
 With Node.js 20 or newer:

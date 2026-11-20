@@ -963,6 +963,11 @@ async function executeBrowserCommand(command) {
   const targetTabId = await resolveTargetTab(tabId);
   // Only in Foxl's own tabs (FOXL ACTS ONLY IN ITS OWN TABS, above), before anything reaches the tab.
   if (!TABLESS_ACTIONS.has(action) && targetTabId != null && !(await isFoxlTab(targetTabId))) return notFoxlTab(targetTabId);
+  // A web page only (WHERE A TAB MAY GO), refused before the step is noted or any tab changes.
+  if (action === 'navigate' || action === 'new_tab') {
+    const to = navigableUrl(params?.url, { required: action === 'navigate' });
+    if (!to.ok) return to.refusal;
+  }
   // A navigation to a file downloads from the site it names, so it is remembered with that one.
   if (targetTabId && (INPUT_ACTIONS.has(action) || action === 'navigate')) await noteActed(targetTabId, action === 'navigate' ? params?.url : null);
 
@@ -1022,11 +1027,18 @@ async function executeBrowserCommand(command) {
       case 'select':
         return await selectOption(targetTabId, params.refId, params.value, deadline);
         
-      case 'navigate':
-        return await navigateTab(targetTabId, params.url);
-        
-      case 'new_tab':
-        return await createNewTab(params.url);
+      case 'navigate': {
+        // A web page only (WHERE A TAB MAY GO, below).
+        const to = navigableUrl(params?.url, { required: true });
+        if (!to.ok) return to.refusal;
+        return await navigateTab(targetTabId, to.url);
+      }
+
+      case 'new_tab': {
+        const to = navigableUrl(params?.url, { required: false });
+        if (!to.ok) return to.refusal;
+        return await createNewTab(to.url);
+      }
         
       case 'close_tab':
         return await closeTab(targetTabId);
@@ -1512,6 +1524,28 @@ async function selectOption(tabId, refId, value, deadline) {
   }
 }
 
+/*
+ * WHERE A TAB MAY GO (foxl-ai/pilot #7924). `navigate` and `new_tab` open a web page (http or https) or a blank
+ * tab, nothing else: `file:`, `data:`, `blob:`, `javascript:` and the browser's own pages are not a page a task is
+ * on. Anything else is refused
+ * by name, before a tab is created or changed. A relative or scheme-less address was never a page either (Chrome
+ * reads it relative to the extension's own origin).
+ */
+function navigableUrl(url, { required }) {
+  const refuse = (error) => ({ ok: false, refusal: { success: false, nothingWasDone: true, error } });
+  if (url === undefined || url === null || url === '') {
+    return required ? refuse('navigate needs a url: an http:// or https:// address.') : { ok: true, url: null };
+  }
+  if (typeof url !== 'string') return refuse('The url must be a string: an http:// or https:// address.');
+  const text = url.trim();
+  if (text === 'about:blank') return { ok: true, url: 'about:blank' };
+  let parsed;
+  try { parsed = new URL(text); } catch { parsed = null; }
+  if (!parsed) return refuse(`${JSON.stringify(text.slice(0, 200))} is not a full address. Foxl opens only http:// and https:// pages (or about:blank); nothing was opened.`);
+  if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return { ok: true, url: parsed.href };
+  return refuse(`Foxl opens only http:// and https:// pages (or about:blank), not ${parsed.protocol} addresses; nothing was opened.`);
+}
+
 /**
  * Navigate tab to URL
  * IMPORTANT: Only navigates Pilot's working tab, not user's current tab
@@ -1805,7 +1839,7 @@ async function createBackgroundTab(url) {
     });
     
     // Track this tab in multi-tab contexts and focus it
-    trackTab(tab.id, url ? new URL(url).hostname : 'new tab', true);
+    trackTab(tab.id, url ? (new URL(url).hostname || 'new tab') : 'new tab', true);
     
     // Add to Pilot group
     const groupId = await addTabToPilotGroup(tab.id);
