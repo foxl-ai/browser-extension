@@ -91,8 +91,9 @@ jobs:
 
       - name: Tag
         run: |
-          git config user.name "Sanghwa Na"
-          git config user.email "sanghwa.me@gmail.com"
+          # A release is tagged by the Foxl bot, never under a person's name or mailbox: the tag is public.
+          git config user.name "foxl-bot[bot]"
+          git config user.email "267836462+foxl-bot[bot]@users.noreply.github.com"
           git tag -a "v$VERSION" -m "Release v$VERSION"
           git push origin "v$VERSION"
 
