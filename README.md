@@ -144,7 +144,7 @@ The network entry points are small enough to inspect directly:
 
 | Source | Requests |
 | :--- | :--- |
-| [Service worker](src/service-worker.js) | Chrome's native messaging to Foxl Desktop's browser bridge (`ai.foxl.browser_bridge`, no network), else health probes at `/api/health`, a WebSocket at `/extension`, and chat requests at `/api/chat` |
+| [Service worker](src/service-worker.js) | Chrome's native messaging to Foxl Desktop's browser bridge (`ai.foxl.browser_bridge`, no network), else health probes at `/api/health` and a WebSocket at `/extension`, which also carries the side panel's messages |
 | [Request watch](src/content-scripts/request-watch.js) | None. It wraps the page's own `fetch` and `XMLHttpRequest` to count the requests still running, and passes every call through unchanged |
 
 The settings page asks the service worker for its actual connection status.
@@ -166,7 +166,7 @@ Everything the extension does is a conversation with Foxl Desktop on the same co
 
 What it does not stop: a program already running as you can read your files and write its own manifest. It no longer takes nothing at all: it takes code running as you.
 
-A desktop without the bridge (an older one, or a browser it does not install into) still gets the WebSocket, so browser control keeps working. A desktop that requires the bridge refuses that socket, and the options page and the side panel then say where to fix it: Foxl Desktop's **Settings > Web Access**, **Reinstall browser connection**.
+A desktop without the bridge (an older one, or a browser it does not install into) still gets the WebSocket, so browser control keeps working. Once the bridge has answered in your browser profile, or whenever a bridge is installed, the extension connects only through the bridge. A desktop that requires the bridge refuses that socket, and the options page and the side panel then say where to fix it: Foxl Desktop's **Settings > Web Access**, **Reinstall browser connection**.
 
 ## Permissions
 

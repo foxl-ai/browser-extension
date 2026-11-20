@@ -7,7 +7,9 @@
  * to the desktop. What Foxl Desktop's own host does is foxl-ai/pilot's to prove
  * (`foxl/scripts/probe-extension-bridge-chrome.mjs`); this file proves the extension's half: it asks Chrome for
  * the host, waits for the pong, announces `transport: "native"`, carries the desktop's commands and answers as
- * objects over the port, says so on the options page, and treats anything but a pong as no bridge.
+ * objects over the port, says so on the options page, and treats anything but a pong as a bridge that did not open:
+ * retried as the bridge, never replaced by the local socket (#7795); only a profile with no host at all, where the
+ * bridge never answered, uses the socket.
  *
  * Chromium reads a user-level host from the profile's own NativeMessagingHosts folder: on Linux the profile is
  * `<XDG_CONFIG_HOME>/chromium`, which the harness sets for the browser alone, and on macOS Chromium 156 found the
@@ -66,19 +68,81 @@ describe('a bridge that answers pong', () => {
   });
 });
 
+/*
+ * THE LOCAL SOCKET ONLY FOR A DESKTOP THAT NEVER INSTALLED THE BRIDGE (foxl-ai/pilot #7795). A bridge that did not
+ * answer pong is retried as the bridge. Each case below is RED on 0.14.0 (main a11298c): an unpaired socket appears.
+ */
+const unpaired = (ext) => ext.sockets.filter((s) => !s.paired);
+
 describe('a bridge that cannot reach the desktop', () => {
   let ext;
-  before(async () => { ext = await launchExtension({ nativeHost: 'unreachable' }); }, { timeout: 60_000 });
+  let page;
+  before(async () => {
+    ext = await launchExtension({ nativeHost: 'unreachable', expectHello: false });
+    page = await ext.context.newPage();
+    await page.goto(`chrome-extension://${ext.extensionId}/options.html`);
+  }, { timeout: 60_000 });
   after(async () => { await ext?.close(); });
 
-  test('anything but a pong is no bridge: the extension falls back to the local socket', async () => {
-    assert.equal(ext.announced?.transport, 'websocket', JSON.stringify(ext.announced));
-    const page = await ext.context.newPage();
+  test('a host that answers anything but pong is retried as the bridge, never replaced by the local socket', async () => {
+    const s = await until(() => status(page), (v) => /exited|closed the port|did not answer/i.test(String(v?.nativeUnavailableReason)), 20_000);
+    assert.match(String(s.nativeUnavailableReason), /exited|closed the port|did not answer/i, JSON.stringify(s));
+    // Two more tries of the bridge (the reconnect ladder: 3 s, then 4.5 s).
+    await sleep(9_000);
+    assert.deepEqual(unpaired(ext), [], `the extension opened the local socket: ${JSON.stringify(ext.sockets)}`);
+    const later = await status(page);
+    assert.equal(later.transport, null, JSON.stringify(later));
+    assert.equal(later.wsConnected, false);
+    // The desktop's port answers its health check, so the panel says where to repair the bridge, never "Connected".
+    assert.equal(later.desktopRequiresBridge, true, JSON.stringify(later));
+  });
+});
+
+describe('a bridge that answered once in this profile', () => {
+  let ext;
+  let page;
+  before(async () => {
+    ext = await launchExtension({ nativeHost: 'relay' });
+    page = await ext.context.newPage();
     await page.goto(`chrome-extension://${ext.extensionId}/options.html`);
-    const s = await until(() => status(page), (v) => v?.transport === 'websocket', 15_000);
-    assert.equal(s.transport, 'websocket', JSON.stringify(s));
-    assert.match(String(s.nativeUnavailableReason), /closed the port|exited|desktop_unreachable|did not answer/i, JSON.stringify(s));
-    await page.close();
+  }, { timeout: 60_000 });
+  after(async () => { await ext?.close(); });
+
+  test('the first channel is the bridge', () => {
+    assert.equal(ext.announced?.transport, 'native', JSON.stringify(ext.announced));
+    assert.deepEqual(unpaired(ext), []);
+  });
+
+  test('then a bridge that cannot reach the desktop never sends it to the local socket', async () => {
+    ext.nativeHostMode('unreachable');
+    ext.dropSockets();
+    const s = await until(() => status(page), (v) => v?.transport === null && /exited|closed the port|did not answer/i.test(String(v?.nativeUnavailableReason)), 20_000);
+    assert.equal(s.transport, null, JSON.stringify(s));
+    await sleep(6_000);
+    assert.deepEqual(unpaired(ext), [], `the extension opened the local socket: ${JSON.stringify(ext.sockets)}`);
+  });
+
+  test('a bridge that can reach the desktop again reconnects as before', async () => {
+    ext.nativeHostMode('relay');
+    ext.dropSockets();
+    const s = await until(() => status(page), (v) => v?.transport === 'native', 45_000);
+    assert.equal(s.transport, 'native', JSON.stringify(s));
+    assert.ok(ext.sockets.filter((x) => x.paired).length >= 2, JSON.stringify(ext.sockets));
+  });
+
+  test('and once the bridge answered here, a manifest that is gone is a bridge to repair, never the local socket', async () => {
+    ext.removeNativeHost();
+    ext.dropSockets();
+    const s = await until(() => status(page), (v) => v?.transport === null && /not found/i.test(String(v?.nativeUnavailableReason)), 30_000);
+    assert.match(String(s.nativeUnavailableReason), /Specified native messaging host not found/, JSON.stringify(s));
+    await sleep(6_000);
+    assert.deepEqual(unpaired(ext), [], `the extension opened the local socket: ${JSON.stringify(ext.sockets)}`);
+    const later = await status(page);
+    assert.equal(later.desktopRequiresBridge, true, JSON.stringify(later));
+    const text = page.locator('#statusText');
+    await page.reload();
+    await until(() => text.innerText(), (t) => t.includes('Reinstall browser connection'), 15_000);
+    assert.match(await text.innerText(), /Reinstall browser connection/);
   });
 });
 
