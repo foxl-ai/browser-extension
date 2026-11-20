@@ -131,6 +131,9 @@ Anything the desktop app retains after receiving this data is covered by
   can type and click on a page without the border showing.
 - **Cut the connection.** Quit the desktop app. With nothing listening on
   its configured server, the extension receives no new task commands.
+- **Stop a task.** Pressing **Stop Foxl** on a page tells Foxl Desktop to stop that
+  task, and the extension refuses the task's commands still on their way; your next
+  request starts afresh.
 - **Remove it.** Uninstalling from `chrome://extensions` takes its stored
   settings with it.
 

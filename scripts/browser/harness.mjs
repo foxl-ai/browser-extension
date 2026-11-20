@@ -145,6 +145,8 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
   let nextId = 1;
   const pairing = randomBytes(16).toString('hex');
   const seen = [];
+  /** Every frame the extension sent but its pings and command answers (`stop_agent`, `chat`, ...), in order. */
+  const frames = [];
   const waiting = new Map();
   let onHello;
   const helloSeen = new Promise((r) => { onHello = r; });
@@ -176,6 +178,7 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
         try { msg = JSON.parse(String(raw)); } catch { return; }
         if (msg.type === 'ping') ws.send(JSON.stringify({ type: 'pong' }));
         if (msg.type === 'extension_connected') { hello = msg.data ?? {}; onHello(hello); }
+        if (msg.type !== 'ping' && msg.type !== 'browser_result') frames.push(msg);
         if (msg.type === 'browser_result' && waiting.has(msg.requestId)) {
           waiting.get(msg.requestId)(msg.data);
           waiting.delete(msg.requestId);
@@ -236,13 +239,20 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
   }
 
   /** One command, as the desktop sends it; resolves to the extension's `browser_result` data. */
-  const command = (action, tabId, params = {}) => new Promise((resolveResult, reject) => {
+  /** `extra` adds fields beside `action`, `tabId` and `params` (a desktop's `run`). */
+  const command = (action, tabId, params = {}, extra = {}) => new Promise((resolveResult, reject) => {
     if (!socket) { reject(new Error('no extension socket')); return; }
     const requestId = `r${nextId++}`;
     const timer = setTimeout(() => { waiting.delete(requestId); reject(new Error(`${action}: no browser_result in 20 s`)); }, 20_000);
     waiting.set(requestId, (data) => { clearTimeout(timer); resolveResult(data); });
-    socket.send(JSON.stringify({ type: 'browser_command', requestId, data: { action, ...(tabId ? { tabId } : {}), params } }));
+    socket.send(JSON.stringify({ type: 'browser_command', requestId, data: { action, ...(tabId ? { tabId } : {}), params, ...extra } }));
   });
+
+  /** One frame of the desktop's other kinds (`show_indicators`, `hide_indicators`), as the desktop sends it. */
+  const send = (frame) => {
+    if (!socket) throw new Error('no extension socket');
+    socket.send(JSON.stringify(frame));
+  };
 
   /** The extension's own service worker, for what a person does in Chrome's own UI. */
   const extensionWorker = async () => context.serviceWorkers().find((w) => w.url().startsWith(`chrome-extension://${extensionId}/`))
@@ -299,5 +309,5 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
     for (const ws of sockets.clients) ws.terminate();
     socket = null;
   };
-  return { context, origin, command, tabIdOf, announced, close, extensionId, sockets: seen, nativeHostMode, removeNativeHost, dropSockets };
+  return { context, origin, command, send, frames, tabIdOf, announced, close, extensionId, sockets: seen, nativeHostMode, removeNativeHost, dropSockets };
 }
