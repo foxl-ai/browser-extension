@@ -8,6 +8,14 @@ version pinned to the app's unified line; the split makes the two independent.
 
 ## v0.14.1 - Unreleased
 
+### Changed
+
+- **Foxl works only in its own tabs:** the ones it opens, the Foxl tab group, and the tab you
+  send a side panel message from with Current page on, which joins that group. Move a tab
+  into the Foxl group to let Foxl work there, or out of it to take it back.
+- **A custom server address must be on this computer** (`localhost`, `127.0.0.1` or
+  `[::1]`). One saved for another computer is no longer used.
+
 ### Fixed
 
 - Security fixes. Update to get them.
