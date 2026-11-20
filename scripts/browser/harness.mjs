@@ -102,17 +102,22 @@ const sh = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
 function installHarnessHost({ profile, config, id, url, mode }) {
   const program = join(config, 'foxl-harness-bridge');
   const relay = join(ROOT, 'scripts', 'browser', 'native-host-relay.mjs');
-  writeFileSync(program, `#!/bin/sh\nFOXL_HARNESS_BRIDGE_URL=${sh(url)} FOXL_HARNESS_BRIDGE_MODE=${sh(mode)} exec ${sh(process.execPath)} ${sh(relay)} "$@"\n`);
+  // The mode is read from this file at every launch, so a test can change what the next bridge does (`nativeHostMode`).
+  const modeFile = join(config, 'foxl-harness-bridge.mode');
+  writeFileSync(modeFile, mode);
+  writeFileSync(program, `#!/bin/sh\nFOXL_HARNESS_BRIDGE_URL=${sh(url)} FOXL_HARNESS_BRIDGE_MODE_FILE=${sh(modeFile)} exec ${sh(process.execPath)} ${sh(relay)} "$@"\n`);
   chmodSync(program, 0o755);
   const hosts = join(profile, 'NativeMessagingHosts');
   mkdirSync(hosts, { recursive: true });
-  writeFileSync(join(hosts, `${HARNESS_HOST_NAME}.json`), JSON.stringify({
+  const manifest = join(hosts, `${HARNESS_HOST_NAME}.json`);
+  writeFileSync(manifest, JSON.stringify({
     name: HARNESS_HOST_NAME,
     description: 'Foxl extension test harness bridge',
     path: program,
     type: 'stdio',
     allowed_origins: [`chrome-extension://${id}/`],
   }, null, 2));
+  return { modeFile, manifest };
 }
 
 /**
@@ -128,8 +133,13 @@ function installHarnessHost({ profile, config, id, url, mode }) {
  * answers the extension's ping with an error frame and exits, as the real bridge does when it cannot reach the
  * desktop. `sockets` lists every `/extension` socket the harness accepted or refused, in order:
  * `{ paired, caller, refused }` (`caller` is the origin Chrome gave the bridge as its first argument).
+ *
+ * `expectHello: false` resolves without waiting for an announcement (`announced` is null), for a launch that must open
+ * no channel. With a bridge installed, `nativeHostMode(mode)` changes what the NEXT bridge Chrome starts does,
+ * `removeNativeHost()` deletes its manifest (Chrome then answers "Specified native messaging host not found."), and
+ * `dropSockets()` closes every live `/extension` socket, as a desktop that quits does (a bridge exits with its socket).
  */
-export async function launchExtension({ routes = {}, grant = [], refuseSocket = null, nativeHost = null } = {}) {
+export async function launchExtension({ routes = {}, grant = [], refuseSocket = null, nativeHost = null, expectHello = !(refuseSocket && nativeHost !== 'relay') } = {}) {
   let socket = null;
   let hello = null;
   let nextId = 1;
@@ -189,6 +199,7 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
   let announced;
   let helloTimer;
   let extensionId = null;
+  let host = null;
   try {
     ({ dir: extDir, id: extensionId } = extensionCopy(port, grant));
     config = mkdtempSync(join(tmpdir(), 'foxl-extension-profile-'));
@@ -196,7 +207,7 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
     mkdirSync(profile, { recursive: true });
     if (nativeHost) {
       if (!['relay', 'unreachable'].includes(nativeHost)) throw new Error(`nativeHost must be 'relay' or 'unreachable', got ${JSON.stringify(nativeHost)}`);
-      installHarnessHost({ profile, config, id: extensionId, url: `ws://127.0.0.1:${port}/extension?pairing=${pairing}`, mode: nativeHost });
+      host = installHarnessHost({ profile, config, id: extensionId, url: `ws://127.0.0.1:${port}/extension?pairing=${pairing}`, mode: nativeHost });
     }
     context = await chromium.launchPersistentContext(profile, {
       channel: 'chromium',
@@ -209,7 +220,7 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
       acceptDownloads: true,
       env: { ...process.env, XDG_CONFIG_HOME: config },
     });
-    announced = refuseSocket && nativeHost !== 'relay' ? null : await Promise.race([
+    announced = !expectHello ? null : await Promise.race([
       helloSeen,
       new Promise((_, reject) => { helloTimer = setTimeout(() => reject(new Error('the extension never connected to the test desktop')), 20_000); }),
     ]);
@@ -250,5 +261,20 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
     rmSync(extDir, { recursive: true, force: true });
     rmSync(config, { recursive: true, force: true });
   };
-  return { context, origin, command, tabIdOf, announced, close, extensionId, sockets: seen };
+
+  const needHost = () => { if (!host) throw new Error('this launch installed no bridge (nativeHost)'); };
+  /** What the next bridge Chrome starts does: 'relay' or 'unreachable'. */
+  const nativeHostMode = (mode) => {
+    needHost();
+    if (!['relay', 'unreachable'].includes(mode)) throw new Error(`mode must be 'relay' or 'unreachable', got ${JSON.stringify(mode)}`);
+    writeFileSync(host.modeFile, mode);
+  };
+  /** The bridge's manifest is gone, as when Foxl Desktop is moved or removed. */
+  const removeNativeHost = () => { needHost(); rmSync(host.manifest, { force: true }); };
+  /** Every live /extension socket closes, as a desktop that quits closes them. */
+  const dropSockets = () => {
+    for (const ws of sockets.clients) ws.terminate();
+    socket = null;
+  };
+  return { context, origin, command, tabIdOf, announced, close, extensionId, sockets: seen, nativeHostMode, removeNativeHost, dropSockets };
 }

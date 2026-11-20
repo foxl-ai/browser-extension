@@ -11,16 +11,21 @@
  *   - `{ type: "ping" }` is answered `{ type: "pong" }` only once the socket to the harness is open;
  *   - every other frame is relayed to the harness as JSON text, and the harness's frames come back as objects;
  *   - the socket presents the harness's pairing value and the caller origin Chrome passed as argv[2].
- * `FOXL_HARNESS_BRIDGE_MODE=unreachable` answers the ping with `{ type: "error", error: "desktop_unreachable" }`
- * and exits, as Foxl Desktop's bridge does when it cannot reach the desktop.
+ * Mode `unreachable` (read from `FOXL_HARNESS_BRIDGE_MODE_FILE` at launch) answers the ping with
+ * `{ type: "error", error: "desktop_unreachable" }` and exits, as Foxl Desktop's bridge does when it cannot reach the desktop.
  *
  * Stdout carries frames only; everything else goes to stderr, which Chrome keeps in its own log.
  */
+import { readFileSync } from 'node:fs';
 import { endianness } from 'node:os';
 import { WebSocket } from 'ws';
 
 const URL_TO_HARNESS = process.env.FOXL_HARNESS_BRIDGE_URL || '';
-const MODE = process.env.FOXL_HARNESS_BRIDGE_MODE || 'relay';
+// The harness writes the mode to a file (`nativeHostMode`), read at each launch; the variable is the older wrapper's.
+const modeFromFile = () => {
+  try { return readFileSync(process.env.FOXL_HARNESS_BRIDGE_MODE_FILE || '', 'utf8').trim(); } catch { return ''; }
+};
+const MODE = modeFromFile() || process.env.FOXL_HARNESS_BRIDGE_MODE || 'relay';
 const CALLER = process.argv[2] || '';
 const LE = endianness() === 'LE';
 

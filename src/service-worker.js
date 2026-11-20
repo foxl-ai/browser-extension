@@ -283,17 +283,54 @@ let desktopRequiresBridge = false;
 /**
  * Is this error message Chrome saying "there is no host here"?
  *
- * Both spellings are Chrome's own: a missing manifest and a manifest that does not list
- * this extension. Neither is worth retrying - the first needs the desktop app to install
- * itself, the second needs a new manifest - so both mean "use the fallback", while any
- * OTHER disconnect reason (the host crashed, the app was mid-update) is transient and
- * gets the normal reconnect ladder.
+ * Both spellings are Chrome's own, matched whole: a missing manifest ("Specified native
+ * messaging host not found.") and a manifest that does not list this extension ("Access to
+ * the specified native messaging host is forbidden."). Neither is worth retrying - the first
+ * needs the desktop app to install itself, the second needs a new manifest. Any OTHER
+ * disconnect reason (the host exited, it could not reach the desktop, it was mid-update) is a
+ * host that EXISTS, and never sends the extension to the local socket.
  */
 function nativeHostAbsent(message) {
-  return /native messaging host not found|host is forbidden|not found|forbidden/i.test(
-    String(message || ''),
+  return /^(?:Specified native messaging host not found|Access to the specified native messaging host is forbidden)\.?$/.test(
+    String(message || '').trim(),
   );
 }
+
+/*
+ * THE LOCAL SOCKET IS ONLY FOR A DESKTOP THAT NEVER INSTALLED THE BRIDGE (foxl-ai/pilot #7795).
+ * The socket cannot tell Foxl Desktop from any other program holding its port, so it is the
+ * fallback for one case only: Chrome says there is no host for this extension, and the bridge
+ * has never answered in this browser profile. A host that exists but did not answer `pong` (the
+ * desktop is not running, or could not be reached) is retried as the bridge, never as the
+ * socket; and once the bridge has answered here, a later "no host" (a moved or reinstalled app)
+ * is a broken bridge to repair from Foxl Desktop, not a reason to trust the port. The record is
+ * this profile's (`chrome.storage.local`), so it outlives a browser restart.
+ */
+const BRIDGE_ANSWERED_KEY = 'bridgeAnsweredAt';
+let bridgeAnswered = null; // null until read from storage
+
+/** Has the bridge ever opened a channel in this browser profile? */
+async function bridgeAnsweredHere() {
+  if (bridgeAnswered === null) {
+    const stored = await chrome.storage.local.get(BRIDGE_ANSWERED_KEY).catch(() => ({}));
+    bridgeAnswered = Number(stored?.[BRIDGE_ANSWERED_KEY]) > 0;
+  }
+  return bridgeAnswered;
+}
+
+function noteBridgeAnswered() {
+  bridgeAnswered = true;
+  chrome.storage.local.set({ [BRIDGE_ANSWERED_KEY]: Date.now() }).catch(() => {});
+}
+
+/**
+ * Why the last attempt did not open the local socket even though no channel opened (the host
+ * exists, or the bridge answered here before), for the status surfaces. False once a channel
+ * opens or the socket is tried.
+ */
+let socketDeclined = false;
+/** The native host's last answer was Chrome's "no host here" (above). */
+let nativeHostMissing = false;
 
 /** True while a live channel of any kind is open. */
 function transportIsOpen() {
@@ -326,6 +363,8 @@ function onTransportOpen(kind) {
   console.log(`[Foxl] Connected to desktop over ${kind}`);
   isConnecting = false;
   desktopRequiresBridge = false;
+  socketDeclined = false;
+  if (kind === 'native') noteBridgeAnswered();
   /*
    * REMEMBER THAT A DESKTOP HAS EVER BEEN REACHABLE.
    *
@@ -387,8 +426,10 @@ function onTransportClosed(kind, detail) {
  * console on every reconnect for a setup that is working fine over the socket.
  */
 function openNativeTransport() {
+  nativeHostMissing = false;
   if (typeof chrome.runtime.connectNative !== 'function') {
     nativeUnavailableReason = 'this browser has no native messaging';
+    nativeHostMissing = true;
     return Promise.resolve(null);
   }
 
@@ -398,8 +439,10 @@ function openNativeTransport() {
       port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
     } catch (err) {
       // Thrown when the `nativeMessaging` permission is missing, which is a packaging
-      // mistake rather than a missing desktop - so it is named differently.
+      // mistake rather than a missing desktop - so it is named differently. There is no host
+      // this build can reach, the same answer as "not found".
       nativeUnavailableReason = `connectNative refused: ${err.message}`;
+      nativeHostMissing = true;
       resolve(null);
       return;
     }
@@ -457,7 +500,8 @@ function openNativeTransport() {
       clearTimeout(probeTimer);
       if (!probed) {
         nativeUnavailableReason = detail || 'the native host closed the port';
-        if (!nativeHostAbsent(detail)) {
+        nativeHostMissing = nativeHostAbsent(detail);
+        if (!nativeHostMissing) {
           console.warn('[Foxl] Native host disconnected during handshake:', detail);
         }
         settleProbe(null);
@@ -502,7 +546,17 @@ async function connectToServer() {
 
   const native = await openNativeTransport();
   if (native) return true;
-  console.log(`[Foxl] Native host unavailable (${nativeUnavailableReason}); trying the local socket`);
+
+  // The local socket only when Chrome says there is no host and the bridge never answered here (above).
+  if (!nativeHostMissing || await bridgeAnsweredHere()) {
+    socketDeclined = true;
+    isConnecting = false;
+    console.log(`[Foxl] The browser bridge did not open (${nativeUnavailableReason}); not using the local socket, trying the bridge again later`);
+    scheduleReconnect();
+    return false;
+  }
+  socketDeclined = false;
+  console.log(`[Foxl] No browser bridge for this extension (${nativeUnavailableReason}); trying the local socket`);
 
   return openWebSocketTransport();
 }
@@ -1812,7 +1866,7 @@ function sendToServer(message) {
 }
 
 /**
- * Send chat message to server via HTTP (fallback)
+ * Send the side panel's message to the desktop over the live channel.
  */
 let pendingPanelChat = null;
 
@@ -1820,7 +1874,10 @@ async function sendChatMessage(message, tabId, panelId, requestId) {
   if (pendingPanelChat) {
     return { success: false, error: 'Foxl is working in another side panel. Let that request finish, then try again.' };
   }
-  // Try the live channel first (the native host, or the socket on an older desktop)
+  /*
+   * The live channel only (the native host, or the socket on a desktop that never installed the bridge). There is
+   * no HTTP fallback to `/api/chat` (foxl-ai/pilot #7795).
+   */
   if (transportIsOpen()) {
     pendingPanelChat = { panelId, requestId, tabId };
     if (!transportSend({ type: 'chat', message, tabId })) {
@@ -1829,29 +1886,7 @@ async function sendChatMessage(message, tabId, panelId, requestId) {
     }
     return { success: true, pending: true };
   }
-  
-  // Fallback to HTTP
-  const serverUrl = await getServerUrl();
-  
-  try {
-    const response = await fetch(`${serverUrl}/api/chat`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ message }),
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Server error: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    return { success: true, content: data.response };
-  } catch (err) {
-    console.error('[Foxl] Chat error:', err);
-    return { success: false, error: err.message };
-  }
+  return { success: false, error: 'Foxl Desktop is not connected. Open Foxl Desktop on this computer, then try again.' };
 }
 
 /**
@@ -1954,8 +1989,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           wsConnected,
           transport: transportKind(),
           nativeUnavailableReason: transportKind() === 'native' ? null : nativeUnavailableReason,
-          // The HTTP health check answers while the socket is refused, so `connected` alone would read as working.
-          desktopRequiresBridge: !wsConnected && desktopRequiresBridge,
+          // The HTTP health check answers while the socket is refused, so `connected` alone would read as working. The
+          // same when the bridge is installed (or answered here before) and did not open: the socket is never used then.
+          desktopRequiresBridge: !wsConnected && (desktopRequiresBridge || (socketDeclined && httpConnected)),
           everConnected: seenDesktop,
           serverUrl: await getServerUrl(),
           // A saved address that is not on this computer, which getServerUrl does not use (src/server-url.js).
