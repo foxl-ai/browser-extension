@@ -869,7 +869,8 @@ function broadcastTabContexts() {
  *
  * A command names a tab by id, and it acts only in a tab that is Foxl's:
  *   - a tab Foxl opened (`new_tab`, a navigation that had no tab), tracked in `tabContexts`;
- *   - a tab in the Foxl tab group, which includes a tab the person moves into it;
+ *   - a tab in one of Foxl's own tab groups, which includes a tab the person moves into one. A group is Foxl's
+ *     only when this extension made it (FOXL'S OWN GROUPS ARE KNOWN BY ID, below), never by its title;
  *   - the tab the person is on when they send a message from Foxl's side panel with Current page on: it joins
  *     the Foxl tab group, where the person sees it and takes it back by removing it from the group, and a tab
  *     that cannot join a group (pinned, or in a pop-up window) is kept by id for the session instead
@@ -883,8 +884,34 @@ function broadcastTabContexts() {
 const HANDED_TABS_KEY = 'foxlHandedTabs';
 const handedTabs = new Set();
 let handedLoaded = null;
-const FOXL_GROUP_TITLES = new Set(['Foxl', 'Pilot']);
 const OPENER_DEPTH = 5;
+
+/*
+ * FOXL'S OWN GROUPS ARE KNOWN BY ID, NEVER BY TITLE (foxl-ai/pilot #7802). A tab group is Foxl's only when this
+ * extension made it (addTabToPilotGroup, joinFoxlGroup), which records its id here, in chrome.storage.session so a
+ * restarted worker still knows it. A group the person makes is theirs whatever they name it, "Foxl" or "Pilot"
+ * included, and a group an earlier build made in another browser session is not adopted by its name either. Chrome
+ * clears session storage when the browser restarts and when the extension updates, so the group from before is then
+ * the person's, and Foxl starts a new one for its next tab.
+ */
+const FOXL_GROUPS_KEY = 'foxlGroupIds';
+const foxlGroupIds = new Set();
+let foxlGroupsLoaded = null;
+
+function loadFoxlGroups() {
+  foxlGroupsLoaded ??= chrome.storage.session.get(FOXL_GROUPS_KEY).then((stored) => {
+    for (const id of stored?.[FOXL_GROUPS_KEY] ?? []) if (Number.isSafeInteger(id)) foxlGroupIds.add(id);
+  }).catch(() => {});
+  return foxlGroupsLoaded;
+}
+
+/** A group this extension just made. */
+async function recordFoxlGroup(groupId) {
+  if (!Number.isSafeInteger(groupId) || groupId < 0) return;
+  await loadFoxlGroups();
+  foxlGroupIds.add(groupId);
+  await chrome.storage.session.set({ [FOXL_GROUPS_KEY]: [...foxlGroupIds] }).catch(() => {});
+}
 
 function loadHandedTabs() {
   handedLoaded ??= chrome.storage.session.get(HANDED_TABS_KEY).then((stored) => {
@@ -921,12 +948,14 @@ async function handTab(tabId) {
 /** Put a tab in a Foxl group of its own window (a new one when there is none): a tab never moves to another window. */
 async function joinFoxlGroup(tab) {
   try {
+    await loadFoxlGroups();
     const groups = await chrome.tabGroups.query({ windowId: tab.windowId });
-    const here = groups.find((g) => g.id === pilotTabGroupId || FOXL_GROUP_TITLES.has(g.title));
+    const here = groups.find((g) => foxlGroupIds.has(g.id));
     if (here) {
       await chrome.tabs.group({ tabIds: [tab.id], groupId: here.id });
     } else {
       const groupId = await chrome.tabs.group({ tabIds: [tab.id], createProperties: { windowId: tab.windowId } });
+      await recordFoxlGroup(groupId);
       // Chrome needs a moment after creating a group before its properties take (addTabToPilotGroup).
       await new Promise((r) => setTimeout(r, 100));
       await chrome.tabGroups.update(groupId, { title: 'Foxl', color: 'cyan', collapsed: false });
@@ -940,8 +969,8 @@ async function joinFoxlGroup(tab) {
 
 async function isFoxlGroup(groupId) {
   if (!Number.isSafeInteger(groupId) || groupId < 0) return false;
-  if (groupId === pilotTabGroupId) return true;
-  try { return FOXL_GROUP_TITLES.has((await chrome.tabGroups.get(groupId)).title); } catch { return false; }
+  await loadFoxlGroups();
+  return foxlGroupIds.has(groupId);
 }
 
 /**
@@ -971,16 +1000,15 @@ async function isFoxlTab(tabId) {
 }
 
 /**
- * isFoxlTab for a whole tab list at once (get_tabs), with the same rules: the groups and the pop-up windows are read
- * once, not per tab, so listing a hundred tabs costs three calls, not three hundred.
+ * isFoxlTab for a whole tab list at once (get_tabs), with the same rules: Foxl's groups and the pop-up windows are read
+ * once, not per tab, so listing a hundred tabs costs two calls, not three hundred.
  */
 async function foxlTabsAmong(tabs) {
   await loadHandedTabs();
-  const groups = await chrome.tabGroups.query({}).catch(() => []);
-  const foxlGroups = new Set(groups.filter((g) => g.id === pilotTabGroupId || FOXL_GROUP_TITLES.has(g.title)).map((g) => g.id));
+  await loadFoxlGroups();
   const popups = new Set((await chrome.windows.getAll({ windowTypes: ['popup'] }).catch(() => [])).map((w) => w.id));
   const byId = new Map(tabs.map((t) => [t.id, t]));
-  const own = (t) => tabContexts.has(t.id) || handedTabs.has(t.id) || foxlGroups.has(t.groupId);
+  const own = (t) => tabContexts.has(t.id) || handedTabs.has(t.id) || foxlGroupIds.has(t.groupId);
   return tabs.map((tab) => {
     let t = tab;
     for (let depth = 0; t && depth <= OPENER_DEPTH; depth++) {
@@ -999,7 +1027,7 @@ function notFoxlTab(tabId) {
     nothingWasDone: true,
     notFoxlTab: true,
     tabId,
-    error: `Tab ${tabId} is not one of Foxl's tabs, so nothing was done. Foxl acts only in tabs it opened (new_tab, and the tabs those open), tabs in the Foxl tab group, and the tab the person sends a message from in Foxl's side panel. Open the page with new_tab, or ask the person to move that tab into the Foxl group.`,
+    error: `Tab ${tabId} is not one of Foxl's tabs, so nothing was done. Foxl acts only in tabs it opened (new_tab, and the tabs those open), tabs in the tab group Foxl made, and the tab the person sends a message from in Foxl's side panel. Open the page with new_tab, or ask the person to send a message from Foxl's side panel while on that tab, which moves it into Foxl's group.`,
   };
 }
 
@@ -2043,12 +2071,13 @@ async function getOrCreatePilotTabGroup() {
     }
   }
   
-  // Find existing Pilot group by querying all groups
+  // One of Foxl's own groups that is still open (FOXL'S OWN GROUPS ARE KNOWN BY ID), never one found by its title.
   try {
+    await loadFoxlGroups();
     const groups = await chrome.tabGroups.query({});
-    const pilotGroup = groups.find(g => g.title === 'Foxl' || g.title === 'Pilot');
-    if (pilotGroup) {
-      pilotTabGroupId = pilotGroup.id;
+    const mine = groups.find((g) => foxlGroupIds.has(g.id));
+    if (mine) {
+      pilotTabGroupId = mine.id;
       return pilotTabGroupId;
     }
   } catch (e) {
@@ -2072,6 +2101,7 @@ async function addTabToPilotGroup(tabId) {
     } else {
       // Create new group with this tab
       groupId = await chrome.tabs.group({ tabIds: [tabId] });
+      await recordFoxlGroup(groupId);
       
       // IMPORTANT: Wait before updating - Chrome needs time to create the group
       await new Promise(r => setTimeout(r, 100));

@@ -7,7 +7,9 @@
  * here holds "A private note". A tab handed over from the side panel joins the Foxl group, so the page it opens in a
  * new tab is Foxl's too, and the desktop's show_indicators draws the overlay on Foxl's tabs only. Each refusal case,
  * the listing, the hand-over's group and the overlay case are RED on 0.14.0 (main a11298c); the first case and the
- * side panel's are the controls, green on both. The case that would change the tab runs last.
+ * side panel's are the controls, green on both. A tab group the person makes is theirs whatever its name: a tab in
+ * their own "Pilot" or "Foxl" group is refused (RED on 0.14.0 and on the build that matched groups by title). The
+ * case that would change the tab runs last.
  *
  * The real extension in Chromium (scripts/browser/harness.mjs). Run: npm run test:browser.
  * FOXL_EXTENSION_DIR=<a tree> runs it against that build.
@@ -160,6 +162,19 @@ test('the desktop\'s show_indicators puts the overlay and its Stop on Foxl\'s ta
   await sleep(1_000);
   assert.equal(await personPage.locator('#pilot-agent-stop-button').count(), 0, 'the overlay is on the person\'s tab');
   ext.send({ type: 'hide_indicators', data: { tabId: foxlTab } });
+});
+
+test('a tab group the person makes is theirs, whatever its name: a tab in their own "Pilot" or "Foxl" group is refused', async () => {
+  for (const title of ['Pilot', 'Foxl']) {
+    const own = await ext.context.newPage();
+    await own.goto(`${ext.origin}/elsewhere#${title}`);
+    const ownTab = await ext.tabIdOf(own, { handOver: false });
+    await ext.personGroup(ownTab, title);
+    refused(await ext.command('get_accessibility_tree', ownTab, { filter: 'all' }), ownTab);
+    const tabs = await ext.command('get_tabs');
+    assert.ok(!tabs.tabs.some((t) => t.id === ownTab), `a tab in the person's "${title}" group is listed: ${JSON.stringify(tabs)}`);
+    await own.close();
+  }
 });
 
 test('typing, a click, a key, a navigation and a close naming another tab are refused, and the tab is unchanged', async () => {
