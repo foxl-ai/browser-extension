@@ -159,6 +159,10 @@ ports. The probe changes no installed extension or real desktop data.
 
 A field `fill_sign_in` typed into reads `value="filled-by-foxl"` in `get_accessibility_tree` (every filter, snapshots and their diffs), and `read_text` of it answers `text: "filled-by-foxl"` with a `note`; neither carries the value or its length. 0.12.1 withheld only its name (an unlabeled field is named by its value), and the line still carried `value="<what was typed>"`. The mark is the element (`__foxlFilledFields`), so it holds when a single-page app changes its path with `history.pushState` (foxl-ai/pilot #6966). There is no new capability: Foxl Desktop keeps masking the filled refs on its own side (`maskChromeFilled`, the same word) for the builds before 0.12.2.
 
+## Foxl's own tabs (0.14.1)
+
+A command acts only in a tab that is Foxl's: one Foxl opened (`new_tab`, or a `navigate` that had no tab), one in the Foxl tab group (a person can move a tab there), the tab the person is on when they send a message from Foxl's side panel, and what one of those opens: a link's new tab joins the Foxl group by itself, and a pop-up window one of them opened (a sign-in pop-up) counts by its `openerTabId`. Any other tab id is answered `{ success: false, notFoxlTab: true, nothingWasDone: true, tabId, error }` and nothing reaches the tab. `switch_tab` focuses only Foxl's tabs, `add_to_group` and `navigate` never adopt another tab, and a `screenshot` with no tab captures the selected tab only when it is Foxl's. `get_tabs` lists only Foxl's tabs; every other tab is counted in `otherTabs` (additive), never named by its URL or title.
+
 ## Audit and build
 
 With Node.js 20 or newer:

@@ -48,7 +48,8 @@ describe('a bridge that answers pong', () => {
     await page.goto(`chrome-extension://${ext.extensionId}/options.html`);
     const answer = await ext.command('get_tabs');
     assert.ok(Array.isArray(answer?.tabs), JSON.stringify(answer));
-    assert.ok(answer.tabs.some((t) => t.url === page.url()), JSON.stringify(answer.tabs.map((t) => t.url)));
+    // The open options page is in the answer: listed (0.14.0), or counted among the tabs that are not Foxl's (0.14.1).
+    assert.ok(answer.tabs.some((t) => t.url === page.url()) || answer.otherTabs >= 1, JSON.stringify(answer));
     await page.close();
   });
 

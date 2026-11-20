@@ -122,7 +122,7 @@ textbox "Search" [ref_4] placeholder="Search..."
 button "Sign in" [ref_5]
 ```
 
-A line shows at most 100 characters of an element's text (200 of a field's value). A longer one ends on `…` and says how much it shows, `clipped=100/5000`, and the agent can read that element's whole text by its ref, a slice at a time. Read with the `all` filter, which also lists what the page is not showing, an element that is not drawn carries `hidden` and one hidden from assistive technology `aria-hidden`, so a hidden error message is never taken for the page's state. A pop-up Chrome blocked is reported with the page, every tab names the tab that opened it, and, once you allow download receipts on the options page, a download that a Foxl task tab starts is reported with its file name, size and state, so a page's "your file is ready" is never the only receipt. `switch_tab` changes which tab the agent's commands go to; it never brings that tab to the front of your window.
+A line shows at most 100 characters of an element's text (200 of a field's value). A longer one ends on `…` and says how much it shows, `clipped=100/5000`, and the agent can read that element's whole text by its ref, a slice at a time. Read with the `all` filter, which also lists what the page is not showing, an element that is not drawn carries `hidden` and one hidden from assistive technology `aria-hidden`, so a hidden error message is never taken for the page's state. A pop-up Chrome blocked is reported with the page, every tab names the tab that opened it, and, once you allow download receipts on the options page, a download that a Foxl task tab starts is reported with its file name, size and state, so a page's "your file is ready" is never the only receipt. `switch_tab` changes which of Foxl's own tabs the agent's commands go to; it never brings that tab to the front of your window.
 
 A click, a key press, or typing that presses Enter waits for what it sent before it answers: a form's answer (the page it loads, or the requests the page sends for it) or the page a followed link loads, for at most about 12 seconds. The answer then says what the page shows, and which form was sent. A click that sends nothing, such as a single-page app's view change, answers at once. When Foxl Desktop says a chat already sent a form with the same choices (the boxes ticked, the options chosen, the amounts and dates typed), a submit of that form during Foxl's own step is stopped and reported, so the same dispute or order is not sent twice by mistake. A sign-in step (a username, a password or a one-time code) is never described. Only a submit made while Foxl's own step waits for its answer is looked at: a form you send yourself at any other time is never described or stopped.
 
@@ -132,7 +132,7 @@ Screenshots capture a background tab without selecting it, including a chosen re
 
 **Extension traffic goes to Foxl on your computer.** It discovers `http://localhost:13847`, with `http://localhost:3847` as the fallback. The options page can set another port on this computer (`localhost`, `127.0.0.1` or `[::1]`); it refuses any other address, and an address an earlier version saved for another computer is not used.
 
-Page text, screenshots, tab URLs and titles, the file names, sizes and states of downloads a Foxl task tab started (once you allow download receipts), and chat requests can pass to that configured server. Foxl Desktop may then send task context to your chosen model provider or connected service. Local transport between Chrome and Desktop does not mean every part of the task stays on your computer.
+Page text, screenshots, the URLs and titles of the tabs Foxl works in (your other tabs only as a count), the file names, sizes and states of downloads a Foxl task tab started (once you allow download receipts), and chat requests can pass to that configured server. Foxl Desktop may then send task context to your chosen model provider or connected service. Local transport between Chrome and Desktop does not mean every part of the task stays on your computer.
 
 The extension has no analytics endpoint, remote configuration, or remotely hosted
 executable code. Connection and appearance settings are stored in
@@ -175,7 +175,7 @@ The manifest requests access to all sites so the agent can work on the pages you
 | Permission | What it enables |
 | :--- | :--- |
 | `<all_urls>` | Read and interact with the pages you allow. |
-| `tabs` | Read tab titles and URLs, navigate, and open, switch, or close tabs. |
+| `tabs` | Read the titles and URLs of the tabs Foxl works in, and open, navigate, switch or close them: the ones it opened, the ones in the Foxl tab group, and the tab you send a side panel message from. It acts in no other tab. |
 | `scripting` | Read snapshots, scroll, and check the target page's current site access before and after a screenshot. |
 | `debugger` | Briefly attach to a background tab to read its viewport and capture its pixels without selecting it. |
 | `tabGroups` | Organize tabs opened for agent tasks. |

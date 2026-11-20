@@ -244,11 +244,34 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
     socket.send(JSON.stringify({ type: 'browser_command', requestId, data: { action, ...(tabId ? { tabId } : {}), params } }));
   });
 
-  /** The extension's tab id for a Playwright page (matched by URL through get_tabs). */
-  const tabIdOf = async (page) => {
-    const tabs = await command('get_tabs');
-    const tab = tabs.tabs?.find((t) => t.url === page.url());
+  /** The extension's own service worker, for what a person does in Chrome's own UI. */
+  const extensionWorker = async () => context.serviceWorkers().find((w) => w.url().startsWith(`chrome-extension://${extensionId}/`))
+    ?? context.waitForEvent('serviceworker', { predicate: (w) => w.url().startsWith(`chrome-extension://${extensionId}/`), timeout: 10_000 });
+
+  /**
+   * The extension's tab id for a Playwright page (matched by URL, asked of Chrome as the person's own browser knows it:
+   * get_tabs names only Foxl's tabs since 0.14.1), HANDED TO FOXL the way a person
+   * does it: moved into a tab group titled "Foxl" in its window (Chrome's own "Add tab to group"). Foxl acts only in
+   * its own tabs (0.14.1, foxl-ai/pilot #7802), and a page a test opens with Playwright is the person's until then.
+   * `{ handOver: false }` leaves it the person's.
+   */
+  const tabIdOf = async (page, { handOver = true } = {}) => {
+    const worker = await extensionWorker();
+    const tabs = await worker.evaluate(() => chrome.tabs.query({}).then((all) => all.map((t) => ({ id: t.id, url: t.url }))));
+    const tab = tabs.find((t) => t.url === page.url());
     if (!tab) throw new Error(`no tab for ${page.url()} in ${JSON.stringify(tabs)}`);
+    if (handOver) {
+      await worker.evaluate(async (id) => {
+        const t = await chrome.tabs.get(id);
+        const [group] = await chrome.tabGroups.query({ windowId: t.windowId, title: 'Foxl' });
+        if (group) {
+          if (t.groupId !== group.id) await chrome.tabs.group({ tabIds: [id], groupId: group.id });
+        } else {
+          const groupId = await chrome.tabs.group({ tabIds: [id], createProperties: { windowId: t.windowId } });
+          await chrome.tabGroups.update(groupId, { title: 'Foxl' });
+        }
+      }, tab.id);
+    }
     return tab.id;
   };
 
