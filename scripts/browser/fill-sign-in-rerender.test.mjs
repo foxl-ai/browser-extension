@@ -7,6 +7,9 @@
  * values a saved sign-in typed in that tab and origin, by salted fingerprint. The masked cases are RED on 0.14.0 (main
  * a11298c); an ordinary field is the control and reads as before. No page handler answers the two messages an older
  * service worker sent (CLICK_ELEMENT, TYPE_IN_ELEMENT): the second typed and read the value back without the check.
+ * Those fingerprints go only with a read of a page on the site they were typed for: once the tab has moved on to
+ * another site, its reads carry none (seen through a pass-through look at what the service worker sends the page
+ * reader).
  *
  * The real extension in Chromium (scripts/browser/harness.mjs), a fictional local bank. Run: npm run test:browser.
  * FOXL_EXTENSION_DIR=<a tree> runs it against that build.
@@ -79,6 +82,38 @@ test('a typing\'s read-back never quotes the filled value, on the same field or 
   const redrawn = await ext.command('type', tabId, { refId: refOf(again, 'User ID'), text: 'someone-else' });
   assert.equal(redrawn?.success, false, JSON.stringify(redrawn));
   assert.ok(!JSON.stringify(redrawn).includes(USER), `the read-back quotes the username: ${JSON.stringify(redrawn)}`);
+  await page.close();
+});
+
+test('a sign-in\'s fingerprints go only with a read of the site they were typed for', async () => {
+  const { page, tabId } = await signedInPage();
+  const worker = ext.context.serviceWorkers().find((w) => w.url().startsWith(`chrome-extension://${ext.extensionId}/`));
+  assert.ok(worker, 'the extension\'s service worker');
+  // A pass-through look at each message the service worker sends a tab: its type and the fingerprints it carries.
+  await worker.evaluate(() => {
+    globalThis.__readsSent = [];
+    if (globalThis.__readsSeen) return;
+    globalThis.__readsSeen = true;
+    const send = chrome.tabs.sendMessage.bind(chrome.tabs);
+    chrome.tabs.sendMessage = (id, message, ...rest) => {
+      globalThis.__readsSent.push({ id, type: message?.type, origin: message?.filled?.origin ?? null, prints: message?.filled?.prints?.length ?? 0 });
+      return send(id, message, ...rest);
+    };
+  });
+  const lastRead = async () => (await worker.evaluate((id) => globalThis.__readsSent.filter((m) => m.id === id && m.type === 'GET_ACCESSIBILITY_TREE'), tabId)).at(-1);
+  // CONTROL: a read of the page the sign-in was typed on carries its fingerprints.
+  const here = await ext.command('get_accessibility_tree', tabId, { filter: 'all' });
+  assert.equal(here?.success, true, JSON.stringify(here));
+  const sentHere = await lastRead();
+  assert.ok(sentHere?.prints > 0 && sentHere.origin === ext.origin, JSON.stringify(sentHere));
+  // The tab moves on to another site (the same server under another origin): its reads carry none of them.
+  const other = ext.origin.replace('//localhost:', '//127.0.0.1:');
+  assert.notEqual(other, ext.origin);
+  await page.goto(`${other}/sign-in#elsewhere`);
+  const there = await ext.command('get_accessibility_tree', tabId, { filter: 'all' });
+  assert.equal(there?.success, true, JSON.stringify(there));
+  const sentThere = await lastRead();
+  assert.equal(sentThere?.prints, 0, `a read of ${other} carried the sign-in's fingerprints: ${JSON.stringify(sentThere)}`);
   await page.close();
 });
 
