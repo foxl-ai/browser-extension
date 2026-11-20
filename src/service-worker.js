@@ -391,6 +391,8 @@ function onTransportOpen(kind) {
     type: 'extension_connected',
     data: { version: chrome.runtime.getManifest().version, capabilities: CAPABILITIES, transport: kind },
   });
+  // A Stop pressed while no channel was open reaches the desktop now (STOP HOLDS).
+  if (stopLatch?.unsent && transportSend({ type: 'stop_agent' })) stopLatch.unsent = false;
   startKeepAlive();
 }
 
@@ -756,12 +758,20 @@ async function handleServerMessage(message) {
       // Execute browser command and send result back. Input actions run one at a time PER
       // TAB, each with a deadline (src/input-queue.js); everything else stays concurrent.
       let result;
-      if (INPUT_ACTIONS.has(data?.action)) {
+      // A command of a run the person stopped is refused, input or not (STOP HOLDS, below).
+      const stopGeneration = stopCount;
+      const runOf = commandRun(data);
+      if (heldByStop(runOf)) {
+        result = stoppedRefusal(data?.action);
+      } else if (INPUT_ACTIONS.has(data?.action)) {
         const tab = await resolveTargetTab(data.tabId);
-        result = await inputQueue.run(tab ?? 'no-tab', (deadline) => executeBrowserCommand({ ...data, tabId: tab ?? data.tabId, deadline }));
+        result = await inputQueue.run(tab ?? 'no-tab', (deadline) => (stopCount !== stopGeneration
+          ? stoppedRefusal(data?.action)
+          : executeBrowserCommand({ ...data, tabId: tab ?? data.tabId, deadline })));
       } else {
         result = await executeBrowserCommand(data);
       }
+      if (runOf) lastRun = runOf;
       if (requestId) {
         sendToServer({
           type: 'browser_result',
@@ -776,6 +786,8 @@ async function handleServerMessage(message) {
       break;
       
     case 'hide_indicators':
+      // After a Stop this is the desktop's answer to it (it has sent one in reply to stop_agent since before 0.7).
+      if (stopLatch) stopLatch.answeredAt = Date.now();
       await hideAgentIndicators(data?.tabId);
       break;
 
@@ -954,6 +966,60 @@ const TABLESS_ACTIONS = new Set(['get_tabs', 'get_pilot_tabs', 'list_contexts', 
  */
 const INPUT_ACTIONS = new Set(['click', 'type', 'select', 'click_at', 'press_key', 'hover', 'fill_sign_in']);
 const inputQueue = createInputQueue();
+
+/*
+ * STOP HOLDS (foxl-ai/pilot #7927). After the person's "Stop Foxl", the stopped run's commands
+ * that still reach the extension are refused, input or not, with `stopped: true`.
+ *
+ * Which run a command belongs to: a desktop that sends `data.run` names it, so a command of the
+ * stopped run is refused for as long as it keeps coming, and a command with another run id is a
+ * new run and ends the hold. A desktop that sends no run id (every one so far) is held until it
+ * has answered the Stop (the `hide_indicators` it sends in reply to `stop_agent`) and then
+ * sent nothing for STOP_QUIET_MS: commands it had already sent before it stopped the run are
+ * refused, and after that the rest of the run is the desktop's own stop. A desktop that sends each
+ * command's run id is the desktop half of foxl-ai/pilot #7927.
+ * A Stop pressed while no channel was open is sent again when one opens.
+ */
+const STOP_QUIET_MS = 1500;
+let stopLatch = null; // { run, answeredAt, lastRefusedAt, unsent }
+let stopCount = 0;
+let lastRun = null;
+
+/** The run a command names (`data.run`, a desktop that sends one), or null. */
+function commandRun(data) {
+  return typeof data?.run === 'string' && data.run ? data.run.slice(0, 128) : null;
+}
+
+function holdStoppedRun() {
+  stopCount += 1;
+  stopLatch = { run: lastRun, answeredAt: null, lastRefusedAt: Date.now(), unsent: false };
+}
+
+/** Is a command of this run (null: none named) held by the person's Stop? Ends the hold once a new run has begun. */
+function heldByStop(run) {
+  if (!stopLatch) return false;
+  if (run) {
+    if (stopLatch.run && run === stopLatch.run) return true;
+    stopLatch = null;
+    return false;
+  }
+  const now = Date.now();
+  if (stopLatch.answeredAt && now - Math.max(stopLatch.answeredAt, stopLatch.lastRefusedAt) >= STOP_QUIET_MS) {
+    stopLatch = null;
+    return false;
+  }
+  stopLatch.lastRefusedAt = now;
+  return true;
+}
+
+function stoppedRefusal(action) {
+  return {
+    success: false,
+    nothingWasDone: true,
+    stopped: true,
+    error: `The person pressed Stop Foxl in this browser, so ${action ? `this ${action}` : 'this command'} was not done. Nothing more of the stopped task runs here; wait for the person's next request.`,
+  };
+}
 
 /**
  * Execute browser command from server
@@ -2199,9 +2265,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         break;
 
       case 'STOP_AGENT':
-        // Nothing queued before Stop runs afterwards (src/input-queue.js).
+        // Nothing queued before Stop runs afterwards (src/input-queue.js), and nothing of the stopped run
+        // that arrives after it either (STOP HOLDS).
+        holdStoppedRun();
         inputQueue.stop();
-        sendToServer({ type: 'stop_agent' });
+        if (!sendToServer({ type: 'stop_agent' })) stopLatch.unsent = true;
         await hideAgentIndicators(sender.tab?.id);
         sendResponse({ success: true });
         break;
