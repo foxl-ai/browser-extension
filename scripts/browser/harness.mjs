@@ -131,7 +131,8 @@ function installHarnessHost({ profile, config, id, url, mode }) {
  * `nativeHost: 'relay'` installs this run's bridge (`installHarnessHost`), which reaches this harness with
  * `?pairing=<this run's value>` the way Foxl Desktop's bridge presents its key; `'unreachable'` installs one that
  * answers the extension's ping with an error frame and exits, as the real bridge does when it cannot reach the
- * desktop. `sockets` lists every `/extension` socket the harness accepted or refused, in order:
+ * desktop, and `'no-key'` one that answers it `no pairing key` and exits, as the real bridge does when it cannot
+ * read its own install. `sockets` lists every `/extension` socket the harness accepted or refused, in order:
  * `{ paired, caller, refused }` (`caller` is the origin Chrome gave the bridge as its first argument).
  *
  * `expectHello: false` resolves without waiting for an announcement (`announced` is null), for a launch that must open
@@ -209,7 +210,7 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
     const profile = join(config, 'chromium');
     mkdirSync(profile, { recursive: true });
     if (nativeHost) {
-      if (!['relay', 'unreachable'].includes(nativeHost)) throw new Error(`nativeHost must be 'relay' or 'unreachable', got ${JSON.stringify(nativeHost)}`);
+      if (!['relay', 'unreachable', 'no-key'].includes(nativeHost)) throw new Error(`nativeHost must be 'relay', 'unreachable' or 'no-key', got ${JSON.stringify(nativeHost)}`);
       host = installHarnessHost({ profile, config, id: extensionId, url: `ws://127.0.0.1:${port}/extension?pairing=${pairing}`, mode: nativeHost });
     }
     context = await chromium.launchPersistentContext(profile, {
@@ -296,10 +297,10 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
   };
 
   const needHost = () => { if (!host) throw new Error('this launch installed no bridge (nativeHost)'); };
-  /** What the next bridge Chrome starts does: 'relay' or 'unreachable'. */
+  /** What the next bridge Chrome starts does: 'relay', 'unreachable' or 'no-key'. */
   const nativeHostMode = (mode) => {
     needHost();
-    if (!['relay', 'unreachable'].includes(mode)) throw new Error(`mode must be 'relay' or 'unreachable', got ${JSON.stringify(mode)}`);
+    if (!['relay', 'unreachable', 'no-key'].includes(mode)) throw new Error(`mode must be 'relay', 'unreachable' or 'no-key', got ${JSON.stringify(mode)}`);
     writeFileSync(host.modeFile, mode);
   };
   /** The bridge's manifest is gone, as when Foxl Desktop is moved or removed. */

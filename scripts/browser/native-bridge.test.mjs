@@ -99,6 +99,17 @@ describe('a bridge that cannot reach the desktop', () => {
   });
 });
 
+describe('an installed bridge that cannot read its own install, in a profile where it never answered', () => {
+  let ext;
+  before(async () => { ext = await launchExtension({ nativeHost: 'no-key' }); }, { timeout: 60_000 });
+  after(async () => { await ext?.close(); });
+
+  test('uses the local socket as 0.14.0 did, so a desktop up to v0.10.8, which admits it, keeps browser control', () => {
+    assert.equal(ext.announced?.transport, 'websocket', JSON.stringify(ext.announced));
+    assert.ok(unpaired(ext).length >= 1, JSON.stringify(ext.sockets));
+  });
+});
+
 describe('a bridge that answered once in this profile', () => {
   let ext;
   let page;
@@ -129,6 +140,15 @@ describe('a bridge that answered once in this profile', () => {
     const s = await until(() => status(page), (v) => v?.transport === 'native', 45_000);
     assert.equal(s.transport, 'native', JSON.stringify(s));
     assert.ok(ext.sockets.filter((x) => x.paired).length >= 2, JSON.stringify(ext.sockets));
+  });
+
+  test('and once the bridge answered here, a bridge that cannot read its own install is one to repair, never the local socket', async () => {
+    ext.nativeHostMode('no-key');
+    ext.dropSockets();
+    const s = await until(() => status(page), (v) => v?.transport === null && /exited|closed the port/i.test(String(v?.nativeUnavailableReason)), 20_000);
+    assert.equal(s.transport, null, JSON.stringify(s));
+    await sleep(6_000);
+    assert.deepEqual(unpaired(ext), [], `the extension opened the local socket: ${JSON.stringify(ext.sockets)}`);
   });
 
   test('and once the bridge answered here, a manifest that is gone is a bridge to repair, never the local socket', async () => {

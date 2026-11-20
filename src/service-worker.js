@@ -333,6 +333,19 @@ function noteBridgeAnswered() {
 let socketDeclined = false;
 /** The native host's last answer was Chrome's "no host here" (above). */
 let nativeHostMissing = false;
+/*
+ * AN INSTALLED HOST THAT CANNOT RUN HERE IS NOT A LISTENER'S ANSWER (foxl-ai/pilot #7795). Foxl Desktop's host
+ * answers `desktop_unreachable` with `no pairing key` or `no server url was configured` when it cannot read its
+ * own install (its native-host.mjs `connectToDesktop`, the same strings since desktop v0.7.5). Under a Windows
+ * profile folder that is not ASCII, desktops before v0.10.9 answer that way, and they also admit the local socket.
+ * No program on the desktop's port can cause that answer, so in a profile where the bridge never answered it is a
+ * bridge that is not there, and the socket is used as in 0.14.0. Any other answer (`desktop_unverified`, `closed
+ * <code>`, `timeout`, `pairing_rejected`, no answer in time) is a host that reached for a listener, and is
+ * retried as the bridge.
+ */
+const HOST_LOCAL_FAULTS = new Set(['no pairing key', 'no server url was configured']);
+/** The installed native host could not run here on the last attempt (above). */
+let nativeHostBroken = false;
 
 /** True while a live channel of any kind is open. */
 function transportIsOpen() {
@@ -431,6 +444,7 @@ function onTransportClosed(kind, detail) {
  */
 function openNativeTransport() {
   nativeHostMissing = false;
+  nativeHostBroken = false;
   if (typeof chrome.runtime.connectNative !== 'function') {
     nativeUnavailableReason = 'this browser has no native messaging';
     nativeHostMissing = true;
@@ -452,6 +466,7 @@ function openNativeTransport() {
     }
 
     let probed = false;
+    let hostFault = false; // the host said it cannot read its own install (HOST_LOCAL_FAULTS)
     const settleProbe = (value) => {
       if (probed) return;
       probed = true;
@@ -485,6 +500,7 @@ function openNativeTransport() {
          * adopting the port on any first message would report a live channel into a
          * host that cannot serve one.
          */
+        if (message?.type === 'error' && message.error === 'desktop_unreachable' && HOST_LOCAL_FAULTS.has(String(message.message ?? ''))) hostFault = true;
         if (message?.type !== 'pong') return;
         clearTimeout(probeTimer);
         transport = nativeTransport;
@@ -505,6 +521,7 @@ function openNativeTransport() {
       if (!probed) {
         nativeUnavailableReason = detail || 'the native host closed the port';
         nativeHostMissing = nativeHostAbsent(detail);
+        nativeHostBroken = !nativeHostMissing && hostFault;
         if (!nativeHostMissing) {
           console.warn('[Foxl] Native host disconnected during handshake:', detail);
         }
@@ -551,8 +568,9 @@ async function connectToServer() {
   const native = await openNativeTransport();
   if (native) return true;
 
-  // The local socket only when Chrome says there is no host and the bridge never answered here (above).
-  if (!nativeHostMissing || await bridgeAnsweredHere()) {
+  // The local socket only when there is no host this extension can use (Chrome says there is none, or the one
+  // installed says it cannot read its own install) and the bridge never answered in this profile (above).
+  if (!(nativeHostMissing || nativeHostBroken) || await bridgeAnsweredHere()) {
     socketDeclined = true;
     isConnecting = false;
     console.log(`[Foxl] The browser bridge did not open (${nativeUnavailableReason}); not using the local socket, trying the bridge again later`);
@@ -560,7 +578,7 @@ async function connectToServer() {
     return false;
   }
   socketDeclined = false;
-  console.log(`[Foxl] No browser bridge for this extension (${nativeUnavailableReason}); trying the local socket`);
+  console.log(`[Foxl] No working browser bridge for this extension (${nativeUnavailableReason}); trying the local socket`);
 
   return openWebSocketTransport();
 }
