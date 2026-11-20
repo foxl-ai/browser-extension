@@ -121,6 +121,11 @@ function renderPageContext() {
     pageButton.setAttribute('aria-label', `${includePage ? 'Exclude' : 'Include'} current page: ${currentPage.title}`);
     pageButton.title = `${currentPage.url}\n${includePage ? 'Click to exclude this page' : 'Click to include this page'}`;
   }
+  // Sending with Current page on hands the tab to Foxl (the service worker's handTab): say so, and how to take it back.
+  const note = $('pageContextNote');
+  note.hidden = !currentPage || !includePage;
+  if (note.hidden) pageButton.removeAttribute('aria-describedby');
+  else pageButton.setAttribute('aria-describedby', 'pageContextNote');
   updateControls();
 }
 

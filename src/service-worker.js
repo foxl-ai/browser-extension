@@ -870,8 +870,10 @@ function broadcastTabContexts() {
  * A command names a tab by id, and it acts only in a tab that is Foxl's:
  *   - a tab Foxl opened (`new_tab`, a navigation that had no tab), tracked in `tabContexts`;
  *   - a tab in the Foxl tab group, which includes a tab the person moves into it;
- *   - the tab the person is on when they send a message from Foxl's side panel (`handedTabs`,
- *     kept in chrome.storage.session so a restarted worker still has it);
+ *   - the tab the person is on when they send a message from Foxl's side panel with Current page on: it joins
+ *     the Foxl tab group, where the person sees it and takes it back by removing it from the group, and a tab
+ *     that cannot join a group (pinned, or in a pop-up window) is kept by id for the session instead
+ *     (`handedTabs`, in chrome.storage.session so a restarted worker still has it);
  *   - what one of those opens: a link's new tab joins the Foxl group by itself, and a pop-up window (a sign-in
  *     pop-up) counts by its opener (isFoxlTab).
  * Anything else is refused by name, with nothing done, and a command never pulls a tab into
@@ -900,13 +902,40 @@ function fromExtensionPage(sender) {
   return sender?.id === chrome.runtime.id && typeof sender.url === 'string' && sender.url.startsWith(chrome.runtime.getURL(''));
 }
 
-/** The person handed this tab to Foxl (Foxl's side panel, on that tab). */
+/**
+ * The person handed this tab to Foxl (Foxl's side panel, on that tab). It joins the Foxl tab group in its own window,
+ * so the person sees it is Foxl's and takes it back by removing it from the group, and a link it opens in a new tab
+ * joins the group too. A tab that cannot join one (pinned, or in a pop-up window) is kept by id for the session.
+ */
 async function handTab(tabId) {
   if (!Number.isSafeInteger(tabId) || tabId < 0) return;
-  try { await chrome.tabs.get(tabId); } catch { return; }
+  let tab;
+  try { tab = await chrome.tabs.get(tabId); } catch { return; }
+  if (await isFoxlGroup(tab.groupId)) return;
+  if (!tab.pinned && await joinFoxlGroup(tab)) return;
   await loadHandedTabs();
   handedTabs.add(tabId);
   saveHandedTabs();
+}
+
+/** Put a tab in a Foxl group of its own window (a new one when there is none): a tab never moves to another window. */
+async function joinFoxlGroup(tab) {
+  try {
+    const groups = await chrome.tabGroups.query({ windowId: tab.windowId });
+    const here = groups.find((g) => g.id === pilotTabGroupId || FOXL_GROUP_TITLES.has(g.title));
+    if (here) {
+      await chrome.tabs.group({ tabIds: [tab.id], groupId: here.id });
+    } else {
+      const groupId = await chrome.tabs.group({ tabIds: [tab.id], createProperties: { windowId: tab.windowId } });
+      // Chrome needs a moment after creating a group before its properties take (addTabToPilotGroup).
+      await new Promise((r) => setTimeout(r, 100));
+      await chrome.tabGroups.update(groupId, { title: 'Foxl', color: 'cyan', collapsed: false });
+      pilotTabGroupId ??= groupId;
+    }
+    return await isFoxlGroup((await chrome.tabs.get(tab.id)).groupId);
+  } catch {
+    return false;
+  }
 }
 
 async function isFoxlGroup(groupId) {
