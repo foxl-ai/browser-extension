@@ -2379,6 +2379,8 @@ function endActing(tabId) {
 async function showAgentIndicators(tabId) {
   const targetTabId = tabId || focusedTabId;
   if (!targetTabId) return;
+  // On Foxl's own tabs only (FOXL ACTS ONLY IN ITS OWN TABS): the overlay and its Stop never claim another tab.
+  if (!(await isFoxlTab(targetTabId))) return;
   overlayWanted.add(targetTabId);
   cancelOverlayHide(targetTabId);
   overlayMessage(targetTabId, 'SHOW_AGENT_INDICATORS');
