@@ -1828,9 +1828,81 @@ async function askTopFrame(tabId, message, waitMs = 0) {
   }
 }
 
+/*
+ * WHAT A STEP SENT, KEPT WHERE THE PAGE CANNOT REACH IT (foxl-ai/pilot #7925). Every described submit leaves a record
+ * of its form and the desktop chat's key, so a step whose answer was never read is held and reported as `leftover` by
+ * the next arm on that site, and a step read in the page it led to says what it sent. The page's step watch sends
+ * it here (STEP_SENT, its top frame only), and it is kept in
+ * chrome.storage.session under the tab and the page's origin as Chrome names the sender: the next arm on that origin
+ * in that tab takes it, and a look in a new page of that origin reads it. Only describe's shape and sizes are kept.
+ */
+const STEP_RECORDS_KEY = 'foxlStepSent';
+const STEP_LEFTOVER_MS = 30 * 60_000;
+const STEP_RECORDS_MAX = 50;
+const stepRecords = new Map(); // `${tabId}|${origin}` -> { info, chat, at, counted }
+let stepRecordsLoaded = null;
+
+function loadStepRecords() {
+  stepRecordsLoaded ??= chrome.storage.session.get(STEP_RECORDS_KEY).then((stored) => {
+    for (const [key, record] of stored?.[STEP_RECORDS_KEY] ?? []) if (!stepRecords.has(key)) stepRecords.set(key, record);
+  }).catch(() => {});
+  return stepRecordsLoaded;
+}
+
+function saveStepRecords() {
+  while (stepRecords.size > STEP_RECORDS_MAX) stepRecords.delete(stepRecords.keys().next().value);
+  chrome.storage.session.set({ [STEP_RECORDS_KEY]: [...stepRecords] }).catch(() => {});
+}
+
+/** A described form in the shape and sizes `describe` gives (step-watch.js), or null. */
+function stepFormOf(info) {
+  if (!info || typeof info !== 'object' || typeof info.digest !== 'string' || !/^[0-9a-f]{16}$/.test(info.digest)) return null;
+  const str = (v, n) => (typeof v === 'string' ? v : '').slice(0, n);
+  return { digest: info.digest, host: str(info.host, 255), action: str(info.action, 2048), label: str(info.label, 80), summary: Array.isArray(info.summary) ? info.summary.slice(0, 8).map((l) => str(l, 200)) : [] };
+}
+
+/** STEP_SENT from a tab's top frame: its record, under that tab and the origin Chrome names for the sender. */
+async function keepStepRecord(sender, record) {
+  const tabId = sender?.tab?.id;
+  const origin = typeof sender?.origin === 'string' ? sender.origin : originOf(sender?.url);
+  const info = stepFormOf(record?.info);
+  if (!Number.isSafeInteger(tabId) || sender.frameId !== 0 || !origin || origin === 'null' || !info) return false;
+  await loadStepRecords();
+  const key = `${tabId}|${origin}`;
+  stepRecords.delete(key);
+  stepRecords.set(key, { info, chat: typeof record.chat === 'string' ? record.chat.slice(0, 256) : '', at: Number(record.at) || Date.now(), counted: record.counted === true });
+  saveStepRecords();
+  return true;
+}
+
+/** The record of this tab and origin, removed (the next arm takes it). */
+async function takeStepRecord(tabId, origin) {
+  await loadStepRecords();
+  const key = `${tabId}|${origin}`;
+  const record = stepRecords.get(key) ?? null;
+  if (record) { stepRecords.delete(key); saveStepRecords(); }
+  return record;
+}
+
+/** A step read in the page it led to (`fromRecord`): what it sent is this tab's record for that page's origin, for this chat. */
+async function withStepRecord(tabId, armed, answer) {
+  if (!answer || answer === LATE || !answer.fromRecord) return answer;
+  await loadStepRecords();
+  const record = typeof answer.pageOrigin === 'string' ? stepRecords.get(`${tabId}|${answer.pageOrigin}`) : null;
+  const submitted = record && armed.chat && record.chat === armed.chat ? stepFormOf(record.info) : null;
+  const { fromRecord: _fromRecord, pageOrigin: _pageOrigin, ...rest } = answer;
+  return { ...rest, submitted };
+}
+
 /** Arms the tab's page (its top frame), or null when it cannot be armed: the step then runs as before. */
 async function armStep(tabId, hold, chat) {
-  const r = await askTopFrame(tabId, { type: 'STEP_ARM', hold: Array.isArray(hold) ? hold : [], chat: typeof chat === 'string' ? chat : '' });
+  // A form a stopped step of this chat sent on this site, taken from the record (WHAT A STEP SENT, below).
+  const key = typeof chat === 'string' ? chat : '';
+  let origin = null;
+  try { origin = originOf((await chrome.tabs.get(tabId)).url); } catch { origin = null; }
+  const record = origin ? await takeStepRecord(tabId, origin) : null;
+  const sent = record && key && record.chat === key && record.counted && Date.now() - record.at >= 0 && Date.now() - record.at < STEP_LEFTOVER_MS ? record.info : null;
+  const r = await askTopFrame(tabId, { type: 'STEP_ARM', hold: Array.isArray(hold) ? hold : [], chat: key, leftover: sent, leftoverOrigin: sent ? origin : '' });
   return r && r.success && typeof r.origin === 'number'
     ? { origin: r.origin, chat: typeof chat === 'string' ? chat : '', leftover: r.leftover || null }
     : null;
@@ -1888,7 +1960,7 @@ async function endStep(tabId, armed) {
 async function finishStep(tabId, armed) {
   const started = Date.now();
   const report = (r) => ({ settled: r.settled, navigated: !!r.navigated, submitted: r.submitted || null, blocked: r.blocked || null, waitedMs: Date.now() - started, page: r.page || null });
-  const look = await askTopFrame(tabId, { type: 'STEP_LOOK', origin: armed.origin, chat: armed.chat });
+  const look = await withStepRecord(tabId, armed, await askTopFrame(tabId, { type: 'STEP_LOOK', origin: armed.origin, chat: armed.chat }));
   // No page answered: the step's page load is under way (or committed before the look). Wait it out and read it.
   if (!look || !look.success) return pageAfterStep(tabId, armed, started, null, false);
   if (look.phase === 'done') {
@@ -1897,7 +1969,7 @@ async function finishStep(tabId, armed) {
     return report(look);
   }
   // A form being sent: until its answer starts.
-  const settle = await askTopFrame(tabId, { type: 'STEP_SETTLE', origin: armed.origin, chat: armed.chat }, STEP_SETTLE_ANSWER_MS);
+  const settle = await withStepRecord(tabId, armed, await askTopFrame(tabId, { type: 'STEP_SETTLE', origin: armed.origin, chat: armed.chat }, STEP_SETTLE_ANSWER_MS));
   // The page did not answer in time (a dialog, a throttled tab): sent if the page had counted it, and still going.
   if (settle === LATE) return { settled: 'still_loading', navigated: !!look.navigated, submitted: look.counted ? look.submitted || null : null, blocked: null, waitedMs: Date.now() - started, page: null };
   // A page load started (or the page went away while it waited): the form went out; its answer is that load.
@@ -2369,6 +2441,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: connected });
         break;
 
+      // A page's step watch: what a step sent, kept out of the page (WHAT A STEP SENT).
+      case 'STEP_SENT':
+        sendResponse({ success: await keepStepRecord(sender, message.record) });
+        break;
+
       case 'SEND_TO_SERVER':
         if (message.data?.type === 'chat' && message.data?.message) {
           // The tab the person is on when they send from Foxl's side panel is handed to Foxl
@@ -2466,6 +2543,11 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   clearPageSnapshots(tabId);
   loadHandedTabs().then(() => { if (handedTabs.delete(tabId)) saveHandedTabs(); });
   loadFilled().then(() => { if (filledPrints.delete(tabId)) saveFilled(); });
+  loadStepRecords().then(() => {
+    let removed = false;
+    for (const key of [...stepRecords.keys()]) if (key.startsWith(`${tabId}|`)) { stepRecords.delete(key); removed = true; }
+    if (removed) saveStepRecords();
+  });
   if (tabContexts.has(tabId)) {
     tabContexts.delete(tabId);
     if (focusedTabId === tabId) {
