@@ -166,7 +166,7 @@ Everything the extension does is a conversation with Foxl Desktop on the same co
 
 What it does not stop: a program already running as you can read your files and write its own manifest. It no longer takes nothing at all: it takes code running as you.
 
-A desktop without the bridge (an older one, or a browser it does not install into) still gets the WebSocket, so browser control keeps working. Once the bridge has answered in your browser profile, or whenever a bridge is installed, the extension connects only through the bridge. A desktop that requires the bridge refuses that socket, and the options page and the side panel then say where to fix it: Foxl Desktop's **Settings > Web Access**, **Reinstall browser connection**.
+A desktop without the bridge (an older one, or a browser it does not install into) still gets the WebSocket, so browser control keeps working, and so does an installed bridge that says it cannot read its own install, until the bridge has answered in your browser profile. Once it has answered there, or whenever an installed bridge runs, the extension connects only through the bridge. A desktop that requires the bridge refuses that socket, and the options page and the side panel then say where to fix it: Foxl Desktop's **Settings > Web Access**, **Reinstall browser connection**.
 
 ## Permissions
 

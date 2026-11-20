@@ -13,6 +13,8 @@
  *   - the socket presents the harness's pairing value and the caller origin Chrome passed as argv[2].
  * Mode `unreachable` (read from `FOXL_HARNESS_BRIDGE_MODE_FILE` at launch) answers the ping with
  * `{ type: "error", error: "desktop_unreachable" }` and exits, as Foxl Desktop's bridge does when it cannot reach the desktop.
+ * Mode `no-key` answers it `{ type: "error", error: "desktop_unreachable", message: "no pairing key" }` and exits once that
+ * frame is written, as Foxl Desktop's bridge does when it cannot read its own install (its native-host.mjs `connectToDesktop`).
  *
  * Stdout carries frames only; everything else goes to stderr, which Chrome keeps in its own log.
  */
@@ -29,11 +31,11 @@ const MODE = modeFromFile() || process.env.FOXL_HARNESS_BRIDGE_MODE || 'relay';
 const CALLER = process.argv[2] || '';
 const LE = endianness() === 'LE';
 
-function write(value) {
+function write(value, done) {
   const body = Buffer.from(JSON.stringify(value), 'utf8');
   const head = Buffer.alloc(4);
   if (LE) head.writeUInt32LE(body.length, 0); else head.writeUInt32BE(body.length, 0);
-  process.stdout.write(Buffer.concat([head, body]));
+  process.stdout.write(Buffer.concat([head, body]), done);
 }
 
 let socket = null;
@@ -60,6 +62,10 @@ async function handle(message) {
     if (MODE === 'unreachable') {
       write({ type: 'error', error: 'desktop_unreachable', message: 'the harness bridge was told not to reach the harness' });
       process.exit(0);
+    }
+    if (MODE === 'no-key') {
+      write({ type: 'error', error: 'desktop_unreachable', message: 'no pairing key' }, () => process.exit(0));
+      return;
     }
     try {
       await open();
