@@ -261,29 +261,43 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
 
   /**
    * The extension's tab id for a Playwright page (matched by URL, asked of Chrome as the person's own browser knows it:
-   * get_tabs names only Foxl's tabs since 0.14.1), HANDED TO FOXL the way a person
-   * does it: moved into a tab group titled "Foxl" in its window (Chrome's own "Add tab to group"). Foxl acts only in
-   * its own tabs (0.14.1, foxl-ai/pilot #7802), and a page a test opens with Playwright is the person's until then.
-   * `{ handOver: false }` leaves it the person's.
+   * get_tabs names only Foxl's tabs since 0.14.1), HANDED TO FOXL the way a person does it: moved into Foxl's own tab
+   * group (dragged there in Chrome's tab strip). Foxl acts only in its own tabs (0.14.1, foxl-ai/pilot #7802), and a
+   * page a test opens with Playwright is the person's until then. Foxl knows its groups by the id it recorded when it
+   * made them, so when there is none yet, Foxl opens a blank tab (`new_tab`, which makes the group) and the person
+   * closes that tab once theirs is in the group. `{ handOver: false }` leaves it the person's.
    */
+  let foxlGroup = null; // the group Foxl made, as this harness has seen it
   const tabIdOf = async (page, { handOver = true } = {}) => {
     const worker = await extensionWorker();
     const tabs = await worker.evaluate(() => chrome.tabs.query({}).then((all) => all.map((t) => ({ id: t.id, url: t.url }))));
     const tab = tabs.find((t) => t.url === page.url());
     if (!tab) throw new Error(`no tab for ${page.url()} in ${JSON.stringify(tabs)}`);
     if (handOver) {
-      await worker.evaluate(async (id) => {
-        const t = await chrome.tabs.get(id);
-        const [group] = await chrome.tabGroups.query({ windowId: t.windowId, title: 'Foxl' });
-        if (group) {
-          if (t.groupId !== group.id) await chrome.tabs.group({ tabIds: [id], groupId: group.id });
-        } else {
-          const groupId = await chrome.tabs.group({ tabIds: [id], createProperties: { windowId: t.windowId } });
-          await chrome.tabGroups.update(groupId, { title: 'Foxl' });
-        }
-      }, tab.id);
+      const moveInto = (groupId) => worker.evaluate(async ({ id, groupId }) => {
+        try { await chrome.tabs.group({ tabIds: [id], groupId }); return true; } catch { return false; }
+      }, { id: tab.id, groupId });
+      if (foxlGroup == null || !(await moveInto(foxlGroup))) {
+        // No url: a blank tab, made at once (with a url, new_tab waits for that page to load).
+        const opened = await command('new_tab', undefined, {});
+        if (!opened?.success || !Number.isInteger(opened.groupId)) throw new Error(`Foxl opened no tab to make its group: ${JSON.stringify(opened)}`);
+        foxlGroup = opened.groupId;
+        if (!(await moveInto(foxlGroup))) throw new Error(`could not move ${page.url()} into Foxl's group`);
+        await worker.evaluate((id) => chrome.tabs.remove(id).catch(() => {}), opened.tabId);
+      }
     }
     return tab.id;
+  };
+
+  /** A tab group the person makes in Chrome's tab strip, under a name of their own; resolves to its id. */
+  const personGroup = async (tabId, title) => {
+    const worker = await extensionWorker();
+    return worker.evaluate(async ({ id, title }) => {
+      const t = await chrome.tabs.get(id);
+      const groupId = await chrome.tabs.group({ tabIds: [id], createProperties: { windowId: t.windowId } });
+      await chrome.tabGroups.update(groupId, { title });
+      return groupId;
+    }, { id: tabId, title });
   };
 
   const close = async () => {
@@ -310,5 +324,5 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
     for (const ws of sockets.clients) ws.terminate();
     socket = null;
   };
-  return { context, origin, command, send, frames, tabIdOf, announced, close, extensionId, sockets: seen, nativeHostMode, removeNativeHost, dropSockets };
+  return { context, origin, command, send, frames, tabIdOf, personGroup, announced, close, extensionId, sockets: seen, nativeHostMode, removeNativeHost, dropSockets };
 }

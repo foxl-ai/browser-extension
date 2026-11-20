@@ -10,9 +10,13 @@ version pinned to the app's unified line; the split makes the two independent.
 
 ### Changed
 
-- **Foxl works only in its own tabs:** the ones it opens, the Foxl tab group, and the tab you
-  send a side panel message from with Current page on, which joins that group. Move a tab
-  into the Foxl group to let Foxl work there, or out of it to take it back.
+- **Foxl works only in its own tabs:** the ones it opens, the tab group it makes (named Foxl),
+  and the tab you send a side panel message from with Current page on, which joins that group.
+  Move a tab into Foxl's group to let Foxl work there, or out of it to take it back. A group you
+  make is yours, whatever you name it, and so is a Foxl group an earlier version made: Foxl
+  starts a group of its own.
+- **After Chrome restarts or the extension updates, Foxl starts a new tab group, and the one
+  from before is yours.**
 - **A custom server address must be on this computer** (`localhost`, `127.0.0.1` or
   `[::1]`). One saved for another computer is no longer used.
 

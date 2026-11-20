@@ -175,7 +175,7 @@ The manifest requests access to all sites so the agent can work on the pages you
 | Permission | What it enables |
 | :--- | :--- |
 | `<all_urls>` | Read and interact with the pages you allow. |
-| `tabs` | Read the titles and URLs of the tabs Foxl works in, and open, navigate, switch or close them: the ones it opened, the ones in the Foxl tab group, and the tab you send a side panel message from with Current page on, which joins the Foxl tab group (remove it from the group to take it back). It acts in no other tab. |
+| `tabs` | Read the titles and URLs of the tabs Foxl works in, and open, navigate, switch or close them: the ones it opened, the ones in the tab group it makes (named Foxl; a group you make is yours, whatever you name it), and the tab you send a side panel message from with Current page on, which joins Foxl's tab group (remove it from the group to take it back). It acts in no other tab. |
 | `scripting` | Read snapshots, scroll, and check the target page's current site access before and after a screenshot. |
 | `debugger` | Briefly attach to a background tab to read its viewport and capture its pixels without selecting it. |
 | `tabGroups` | Organize tabs opened for agent tasks. |

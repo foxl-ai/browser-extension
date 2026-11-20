@@ -125,7 +125,11 @@ Anything the desktop app retains after receiving this data is covered by
   access to all sites because an agent limited to a fixed list cannot run your
   errands, but you are not obliged to grant it.
 - **See when it acts.** The tabs the agent opens sit in their own tab group
-  named "Foxl", and an element it clicks is briefly outlined. While the agent
+  named "Foxl", and an element it clicks is briefly outlined. The extension knows
+  that group by an identifier it keeps in Chrome's session memory, never by its
+  name, so a group you name "Foxl" or "Pilot" stays yours. That memory is cleared
+  when Chrome restarts or the extension updates: a Foxl group that Chrome brings
+  back from before is then yours, and Foxl starts a new group for its next tab. While the agent
   reads, captures, types into or clicks on a page, a border around the page and a
   **Stop Foxl** button show on it, whatever the desktop app sends (since 0.14.1);
   between those steps they stay while the desktop app says a run is under way.
