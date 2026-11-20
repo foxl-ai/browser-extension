@@ -74,8 +74,10 @@
    * Get the semantic role of an element
    */
   function getRole(element) {
-    const explicitRole = element.getAttribute('role');
-    if (explicitRole) return explicitRole;
+    // The role starts a tree line unquoted, so only a role TOKEN is taken: the first of the attribute's list, as
+    // ARIA reads it, letters, digits and dashes (A PAGE FILLS ONLY THE QUOTED FIELDS IT OWNS, below).
+    const explicitRole = (element.getAttribute('role') || '').trim().split(/\s+/)[0];
+    if (explicitRole) return /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(explicitRole) ? explicitRole : 'generic';
     if (isEditingHost(element)) return 'textbox';
 
     const tagName = element.tagName.toLowerCase();
@@ -275,7 +277,17 @@
     return { shown: flat.slice(0, end) + '\u2026', total: flat.length, clipped: true };
   }
 
-  const quoted = (value) => String(value).replace(/"/g, '\\"');
+  /*
+   * A PAGE FILLS ONLY THE QUOTED FIELDS IT OWNS (foxl-ai/pilot #7860). Every page-controlled string in a tree line
+   * goes through `quoted`, which escapes it completely: the backslash, the double quote, line breaks, every other
+   * control character and the Unicode line and paragraph separators. And a ref token appears in a
+   * line only where the extension wrote it: a `[` that would open `[ref_` inside a field is written `\u005b`. A
+   * page's ordinary text, brackets included, reads as before.
+   */
+  const QUOTE_ESCAPES = { '\\': '\\\\', '"': '\\"', '\n': '\\n', '\r': '\\r', '\t': '\\t' };
+  const quoted = (value) => String(value)
+    .replace(/[\\"\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, (c) => QUOTE_ESCAPES[c] ?? `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
+    .replace(/\[(?=ref_)/g, '\\u005b');
 
   /*
    * WHAT A SAVED SIGN-IN TYPED IS NEVER READ BACK (0.12.2, foxl-ai/pilot #6966). A field in `__foxlFilledFields`
@@ -444,7 +456,7 @@
       if (element.disabled || element.getAttribute('aria-disabled') === 'true') line += ' disabled';
       for (const state of ['expanded', 'selected', 'checked']) {
         const value = element.getAttribute(`aria-${state}`);
-        if (value !== null) line += ` ${state}=${JSON.stringify(value)}`;
+        if (value !== null) line += ` ${state}="${quoted(value)}"`;
       }
       if (options.filter === 'all') {
         const hidden = hiddenReason(element);
@@ -470,7 +482,7 @@
             optLine += ' (selected)';
           }
           if (option.value && option.value !== optText) {
-            optLine += ` value="${option.value.replace(/"/g, '\\"')}"`;
+            optLine += ` value="${quoted(option.value)}"`;
           }
           if (optShown?.clipped) {
             optLine += ` clipped=${NAME_CHARS}/${optShown.total}`;
@@ -639,11 +651,11 @@
     return { success: false, error: `Element ${refId} not found. Take a new snapshot: the page may have changed since the last one.` };
   }
 
-  /** A short, page-safe name for an element: tag plus id or first class. */
+  /** A short, page-safe name for an element: tag plus id or first class, escaped like a tree field and cut at 60. */
   function describe(el) {
     if (!el || !el.tagName) return 'something';
-    const id = el.id ? `#${el.id}` : '';
-    const cls = !id && typeof el.className === 'string' && el.className.trim() ? `.${el.className.trim().split(/\s+/)[0]}` : '';
+    const id = el.id ? `#${quoted(String(el.id).slice(0, 60))}` : '';
+    const cls = !id && typeof el.className === 'string' && el.className.trim() ? `.${quoted(el.className.trim().split(/\s+/)[0].slice(0, 60))}` : '';
     return `${el.tagName.toLowerCase()}${id}${cls}`;
   }
 
