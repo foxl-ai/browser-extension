@@ -30,7 +30,7 @@ about them is more useful than a reassuring summary:
 |---|---|---|
 | Page content: text, labels, field values, and structure of the pages you point the agent at | So the agent can understand a page and find the element to act on | The configured Foxl server |
 | Screenshots of the requested tab, including a rectangle or the full document | Visual confirmation of what the page looks like | The configured Foxl server |
-| Tab URLs and titles | So a task can move between sites and the agent knows where it is | The configured Foxl server |
+| The URLs and titles of the tabs Foxl works in (your other tabs only as a count) | So a task can move between sites and the agent knows where it is | The configured Foxl server |
 | Your side-panel messages and recent replies | To answer your request and follow-up questions | The configured Foxl server |
 | Actions the agent performs: clicks, typed text, navigation | They are the work itself | Performed in your browser |
 | After a click or key press that sent a form or loaded a page: the page's title, first heading and first 300 characters of text, and the form's address, its button's words and up to eight of its answers (its choices, such as boxes ticked, options, amounts and dates, or its words when it has no choices; its stable hidden fields such as a product id, never a per-load token; never a form with a password field, and never a sign-in step: a username, a current password or a one-time code) | So Foxl knows what the step did before it reads the page, and does not send the same form twice by mistake | The configured Foxl server, and that site's own session storage in that tab (below) |

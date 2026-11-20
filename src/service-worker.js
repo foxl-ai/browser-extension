@@ -831,6 +831,121 @@ function broadcastTabContexts() {
 }
 
 /*
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ *  FOXL ACTS ONLY IN ITS OWN TABS (foxl-ai/pilot #7802)
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ *
+ * A command names a tab by id, and it acts only in a tab that is Foxl's:
+ *   - a tab Foxl opened (`new_tab`, a navigation that had no tab), tracked in `tabContexts`;
+ *   - a tab in the Foxl tab group, which includes a tab the person moves into it;
+ *   - the tab the person is on when they send a message from Foxl's side panel (`handedTabs`,
+ *     kept in chrome.storage.session so a restarted worker still has it);
+ *   - what one of those opens: a link's new tab joins the Foxl group by itself, and a pop-up window (a sign-in
+ *     pop-up) counts by its opener (isFoxlTab).
+ * Anything else is refused by name, with nothing done, and a command never pulls a tab into
+ * Foxl's group or focus on its own say-so (`switch_tab`, `add_to_group`, `navigate`).
+ * `get_tabs` lists only Foxl's tabs, and counts the others (`otherTabs`) without naming them.
+ */
+const HANDED_TABS_KEY = 'foxlHandedTabs';
+const handedTabs = new Set();
+let handedLoaded = null;
+const FOXL_GROUP_TITLES = new Set(['Foxl', 'Pilot']);
+const OPENER_DEPTH = 5;
+
+function loadHandedTabs() {
+  handedLoaded ??= chrome.storage.session.get(HANDED_TABS_KEY).then((stored) => {
+    for (const id of stored?.[HANDED_TABS_KEY] ?? []) if (Number.isSafeInteger(id)) handedTabs.add(id);
+  }).catch(() => {});
+  return handedLoaded;
+}
+
+function saveHandedTabs() {
+  chrome.storage.session.set({ [HANDED_TABS_KEY]: [...handedTabs] }).catch(() => {});
+}
+
+/** A message from one of this extension's own pages (the side panel, the options page), never a content script. */
+function fromExtensionPage(sender) {
+  return sender?.id === chrome.runtime.id && typeof sender.url === 'string' && sender.url.startsWith(chrome.runtime.getURL(''));
+}
+
+/** The person handed this tab to Foxl (Foxl's side panel, on that tab). */
+async function handTab(tabId) {
+  if (!Number.isSafeInteger(tabId) || tabId < 0) return;
+  try { await chrome.tabs.get(tabId); } catch { return; }
+  await loadHandedTabs();
+  handedTabs.add(tabId);
+  saveHandedTabs();
+}
+
+async function isFoxlGroup(groupId) {
+  if (!Number.isSafeInteger(groupId) || groupId < 0) return false;
+  if (groupId === pilotTabGroupId) return true;
+  try { return FOXL_GROUP_TITLES.has((await chrome.tabGroups.get(groupId)).title); } catch { return false; }
+}
+
+/**
+ * Is this one of Foxl's tabs (above)? A tab that no longer exists is not.
+ *
+ * BY ITS OPENER ONLY IN A POP-UP WINDOW. A link a Foxl tab opens in a new tab joins the Foxl group by itself
+ * (Chromium 156, measured: target=_blank from a grouped tab lands in the group). A page's pop-up window
+ * (window.open with features, a sign-in pop-up) cannot join a group, so it counts by its opener. In a normal
+ * window the opener says nothing about who opened the tab: Chromium names the tab that was selected as the
+ * opener of a new tab the person opens there (measured: a tab opened next to a Foxl tab had it as its opener).
+ */
+async function isFoxlTab(tabId) {
+  if (!Number.isSafeInteger(tabId) || tabId < 0) return false;
+  await loadHandedTabs();
+  let id = tabId;
+  for (let depth = 0; Number.isSafeInteger(id) && depth <= OPENER_DEPTH; depth++) {
+    let tab;
+    try { tab = await chrome.tabs.get(id); } catch { return false; }
+    if (tabContexts.has(id) || handedTabs.has(id)) return true;
+    if (await isFoxlGroup(tab.groupId)) return true;
+    let windowType = null;
+    try { windowType = (await chrome.windows.get(tab.windowId)).type; } catch { windowType = null; }
+    if (windowType !== 'popup') return false;
+    id = tab.openerTabId;
+  }
+  return false;
+}
+
+/**
+ * isFoxlTab for a whole tab list at once (get_tabs), with the same rules: the groups and the pop-up windows are read
+ * once, not per tab, so listing a hundred tabs costs three calls, not three hundred.
+ */
+async function foxlTabsAmong(tabs) {
+  await loadHandedTabs();
+  const groups = await chrome.tabGroups.query({}).catch(() => []);
+  const foxlGroups = new Set(groups.filter((g) => g.id === pilotTabGroupId || FOXL_GROUP_TITLES.has(g.title)).map((g) => g.id));
+  const popups = new Set((await chrome.windows.getAll({ windowTypes: ['popup'] }).catch(() => [])).map((w) => w.id));
+  const byId = new Map(tabs.map((t) => [t.id, t]));
+  const own = (t) => tabContexts.has(t.id) || handedTabs.has(t.id) || foxlGroups.has(t.groupId);
+  return tabs.map((tab) => {
+    let t = tab;
+    for (let depth = 0; t && depth <= OPENER_DEPTH; depth++) {
+      if (own(t)) return true;
+      if (!popups.has(t.windowId)) return false;
+      t = byId.get(t.openerTabId);
+    }
+    return false;
+  });
+}
+
+/** The answer for a command that names a tab Foxl may not act in: nothing was done, and why. */
+function notFoxlTab(tabId) {
+  return {
+    success: false,
+    nothingWasDone: true,
+    notFoxlTab: true,
+    tabId,
+    error: `Tab ${tabId} is not one of Foxl's tabs, so nothing was done. Foxl acts only in tabs it opened (new_tab, and the tabs those open), tabs in the Foxl tab group, and the tab the person sends a message from in Foxl's side panel. Open the page with new_tab, or ask the person to move that tab into the Foxl group.`,
+  };
+}
+
+/** The actions that name no tab of their own (a list, the group, a new tab, the downloads). */
+const TABLESS_ACTIONS = new Set(['get_tabs', 'get_pilot_tabs', 'list_contexts', 'collapse_group', 'expand_group', 'new_tab', 'get_downloads']);
+
+/*
  * ONE INPUT AT A TIME, PER TAB, WITH A DEADLINE (src/input-queue.js has the measurements).
  * Clicks, typing, keys and hovers on one tab share its focus, and Foxl Desktop runs a
  * model's tool calls concurrently, so on one tab they are queued. A tab whose page is stuck
@@ -846,6 +961,8 @@ const inputQueue = createInputQueue();
 async function executeBrowserCommand(command) {
   const { action, tabId, params, deadline } = command;
   const targetTabId = await resolveTargetTab(tabId);
+  // Only in Foxl's own tabs (FOXL ACTS ONLY IN ITS OWN TABS, above), before anything reaches the tab.
+  if (!TABLESS_ACTIONS.has(action) && targetTabId != null && !(await isFoxlTab(targetTabId))) return notFoxlTab(targetTabId);
   // A navigation to a file downloads from the site it names, so it is remembered with that one.
   if (targetTabId && (INPUT_ACTIONS.has(action) || action === 'navigate')) await noteActed(targetTabId, action === 'navigate' ? params?.url : null);
 
@@ -935,6 +1052,8 @@ async function executeBrowserCommand(command) {
         if (!params?.tabId) return { success: false, error: 'params.tabId required for switch_tab' };
         try {
           await chrome.tabs.get(params.tabId);
+          // Focus moves only among Foxl's own tabs: a command never adopts another tab.
+          if (!(await isFoxlTab(params.tabId))) return notFoxlTab(params.tabId);
           focusedTabId = params.tabId;
           if (!tabContexts.has(params.tabId)) {
             trackTab(params.tabId, params.label || null, true);
@@ -963,8 +1082,15 @@ async function executeBrowserCommand(command) {
 
       case 'screenshot': {
         // No target tab known: 0.8.1 captured the selected tab of the current window
-        // (captureVisibleTab(null)), and Foxl Desktop sends no tabId when the model omits it.
-        const shotTabId = targetTabId ?? (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]?.id;
+        // (captureVisibleTab(null)), and Foxl Desktop sends no tabId when the model omits it. That
+        // tab is captured only when it is Foxl's own.
+        let shotTabId = targetTabId;
+        if (shotTabId == null) {
+          const active = (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]?.id;
+          if (active == null) return { success: false, error: 'No tab to capture.' };
+          if (!(await isFoxlTab(active))) return notFoxlTab(active);
+          shotTabId = active;
+        }
         return await captureTabScreenshot(shotTabId, params);
       }
         
@@ -1404,8 +1530,9 @@ async function navigateTab(tabId, url) {
   try {
     const tab = await chrome.tabs.get(targetTabId);
     const pilotGroupId = await getOrCreatePilotTabGroup();
-    
-    // If tab is not in Pilot group, add it (don't create a new one)
+
+    // A Foxl tab outside the group (one the person handed over, a pop-up a Foxl tab opened) joins it; any
+    // other tab was refused before this (executeBrowserCommand, FOXL ACTS ONLY IN ITS OWN TABS).
     if (pilotGroupId && tab.groupId !== pilotGroupId) {
       await addTabToPilotGroup(targetTabId);
     }
@@ -1771,20 +1898,28 @@ async function closeTab(tabId) {
 /**
  * Get all tabs
  */
+/*
+ * Foxl's own tabs only (FOXL ACTS ONLY IN ITS OWN TABS). Every other tab is a number, `otherTabs`, never its URL or
+ * title: an address alone can carry a secret (a reset link, a document's id). A desktop that looks for a tab on a
+ * site (a saved sign-in's page) therefore finds only Foxl's, and opens the page itself when there is none.
+ */
 async function getTabs() {
   try {
     const tabs = await chrome.tabs.query({});
+    const foxl = await foxlTabsAmong(tabs);
+    const mine = tabs.filter((t, i) => foxl[i]);
     return {
       success: true,
-      tabs: tabs.map(t => ({
+      tabs: mine.map((t) => ({
         id: t.id,
         url: t.url,
         title: t.title,
         active: t.active,
         windowId: t.windowId,
         // #6245: the tab that opened this one (a pop-up, a target=_blank link), or null.
-        openerTabId: t.openerTabId ?? null
-      }))
+        openerTabId: t.openerTabId ?? null,
+      })),
+      otherTabs: tabs.length - mine.length,
     };
   } catch (err) {
     return { success: false, error: err.message };
@@ -2011,6 +2146,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       case 'SEND_TO_SERVER':
         if (message.data?.type === 'chat' && message.data?.message) {
+          // The tab the person is on when they send from Foxl's side panel is handed to Foxl
+          // (FOXL ACTS ONLY IN ITS OWN TABS): only from this extension's own pages, never a content script.
+          if (fromExtensionPage(sender) && message.data.tabId != null) await handTab(message.data.tabId);
           const result = await sendChatMessage(message.data.message, message.data.tabId, message.data.panelId, message.data.requestId);
           
           if (result.pending) {
@@ -2057,8 +2195,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ success: false, error: 'tabId required' });
           break;
         }
+        // A tab chosen in Foxl's own pages is the person handing it over; a content script may not.
+        if (!fromExtensionPage(sender)) {
+          sendResponse({ success: false, error: 'SWITCH_TAB is answered only for Foxl\'s own pages' });
+          break;
+        }
         try {
           await chrome.tabs.get(switchId);
+          await handTab(switchId);
           focusedTabId = switchId;
           if (!tabContexts.has(switchId)) {
             trackTab(switchId, null, true);
@@ -2093,6 +2237,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   clearPageSnapshots(tabId);
+  loadHandedTabs().then(() => { if (handedTabs.delete(tabId)) saveHandedTabs(); });
   if (tabContexts.has(tabId)) {
     tabContexts.delete(tabId);
     if (focusedTabId === tabId) {
