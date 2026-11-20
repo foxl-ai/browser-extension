@@ -69,6 +69,24 @@ for (const ref of new Set(referenced)) {
   }
 }
 
+/*
+ * NO WEB PAGE CAN LOAD THE EXTENSION'S FILES (foxl-ai/pilot #7928). A web-accessible
+ * resource is fetchable from any page it matches at chrome-extension://<the extension's fixed id>/<path>. The
+ * content scripts are injected by the manifest and chrome.scripting, which need no such entry, so the extension
+ * lists none. One that is ever truly needed names the sites that need it (never every site) and sets
+ * `use_dynamic_url`, so its URL is not the stable id.
+ */
+for (const war of manifest.web_accessible_resources ?? []) {
+  const matches = war.matches ?? [];
+  if (war.use_dynamic_url !== true) fail(`web_accessible_resources ${JSON.stringify(war.resources)} needs "use_dynamic_url": true`);
+  if (matches.some((m) => m === '<all_urls>' || /^\*:\/\/\*\//.test(m) || /^https?:\/\/\*\//.test(m))) {
+    fail(`web_accessible_resources ${JSON.stringify(war.resources)} is open to every site (${matches.join(', ')}): name the sites that need it`);
+  }
+  for (const file of war.resources ?? []) {
+    if (file.startsWith('src/')) fail(`web_accessible_resources lists extension code (${file}): no page needs to load it`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 2. every declared permission is used, and every used API is declared
 // ---------------------------------------------------------------------------

@@ -81,14 +81,5 @@
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
   },
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "src/content-scripts/accessibility-tree.js",
-        "src/content-scripts/visual-indicator.js"
-      ],
-      "matches": ["<all_urls>"]
-    }
-  ],
   "minimum_chrome_version": "116"
 }
