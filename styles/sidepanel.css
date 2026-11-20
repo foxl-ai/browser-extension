@@ -51,6 +51,7 @@ body { height: 100dvh; min-width: 280px; display: flex; flex-direction: column; 
 .input-container { flex-shrink: 0; padding: 8px 14px 16px; background: hsl(var(--background)); }
 .page-context { display: flex; align-items: center; gap: 9px; max-width: 100%; width: 100%; margin: 0 0 10px; padding: 8px 11px; border: 0; border-radius: var(--r-panel); background: transparent; color: hsl(var(--muted-foreground)); text-align: left; cursor: pointer; }
 .page-context:hover { background: hsl(var(--muted)); }
+.page-context-note { margin: -6px 0 10px; padding: 0 11px; font-size: 12px; line-height: 1.4; color: hsl(var(--muted-foreground)); }
 .page-context-copy { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
 .page-context-label { font-size: 12px; line-height: 1.4; }
 .page-context-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 1.5; color: hsl(var(--foreground)); }

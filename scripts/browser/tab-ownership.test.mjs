@@ -4,9 +4,10 @@
  * A command acts only in a tab Foxl opened, a tab in the Foxl group (a person moves one there: the harness's
  * `tabIdOf`), the tab the person sends a message from in Foxl's side panel, and the tabs those open; any other is
  * refused by name with nothing done, and get_tabs names only Foxl's tabs (the others are a count). The person's tab
- * here holds "A private note". The desktop's show_indicators draws the overlay on Foxl's tabs only. Each refusal
- * case, the listing and the overlay case are RED on 0.14.0 (main a11298c); the first case and the side panel's are
- * the controls, green on both. The case that would change the tab runs last.
+ * here holds "A private note". A tab handed over from the side panel joins the Foxl group, so the page it opens in a
+ * new tab is Foxl's too, and the desktop's show_indicators draws the overlay on Foxl's tabs only. Each refusal case,
+ * the listing, the hand-over's group and the overlay case are RED on 0.14.0 (main a11298c); the first case and the
+ * side panel's are the controls, green on both. The case that would change the tab runs last.
  *
  * The real extension in Chromium (scripts/browser/harness.mjs). Run: npm run test:browser.
  * FOXL_EXTENSION_DIR=<a tree> runs it against that build.
@@ -34,6 +35,8 @@ before(async () => {
       '/inbox': page('Example Mail - Inbox', '<h1>Inbox</h1><p id="secret">A private note</p><input id="reply" aria-label="Reply"><button id="send">Send</button>'),
       '/notes': page('Example Notes', '<h1>Notes</h1><input id="note" aria-label="Note">'),
       '/elsewhere': page('Elsewhere', '<h1>Elsewhere</h1>'),
+      '/shop': page('Example Shop - Basket', '<h1>Basket</h1><a id="next" href="/next-step" target="_blank">Next step</a>'),
+      '/next-step': page('Example Shop - Delivery', '<h1>Delivery</h1>'),
     },
   });
   foxlPage = await ext.context.newPage();
@@ -109,6 +112,43 @@ test('the tab the person sends a message from in Foxl\'s side panel is handed to
   const typed = await ext.command('type', notesTab, { refId: note, text: 'Buy milk' });
   assert.equal(typed?.success, true, JSON.stringify(typed));
   assert.equal(await notes.evaluate(() => document.getElementById('note').value), 'Buy milk');
+  await panel.close();
+});
+
+test('a tab handed over from the side panel joins the Foxl group, and the page it opens in a new tab is Foxl\'s too', async () => {
+  // The desktop answers the side panel's earlier request: the extension holds one side panel request at a time.
+  ext.send({ type: 'SERVER_RESPONSE', data: { type: 'response', content: 'Noted.' } });
+  await sleep(300);
+  const shop = await ext.context.newPage();
+  await shop.goto(`${ext.origin}/shop`);
+  const shopTab = await ext.tabIdOf(shop, { handOver: false });
+  const panel = await ext.context.newPage();
+  await panel.goto(`chrome-extension://${ext.extensionId}/sidepanel.html`);
+  const sent = await panel.evaluate((tabId) => chrome.runtime.sendMessage({
+    type: 'SEND_TO_SERVER',
+    data: { type: 'chat', message: 'Go on to delivery', tabId, panelId: 'panel-2', requestId: 'request-2' },
+  }), shopTab);
+  assert.equal(sent?.success, true, JSON.stringify(sent));
+  // In the Foxl group, where the person sees it and can take it back.
+  const groupTitle = await panel.evaluate(async (tabId) => {
+    const tab = await chrome.tabs.get(tabId);
+    return tab.groupId >= 0 ? (await chrome.tabGroups.get(tab.groupId)).title : null;
+  }, shopTab);
+  assert.equal(groupTitle, 'Foxl', 'the handed tab is not in the Foxl group');
+  // Foxl clicks the page's link, which opens the next step in a new tab: Foxl may act there.
+  const tree = await ext.command('get_accessibility_tree', shopTab, { filter: 'all' });
+  const next = refOf(tree.data.pageContent, 'link "Next step"');
+  assert.ok(next, tree.data.pageContent);
+  const opened = ext.context.waitForEvent('page', { timeout: 10_000 });
+  const clicked = await ext.command('click', shopTab, { refId: next });
+  assert.equal(clicked?.success, true, JSON.stringify(clicked));
+  const delivery = await opened;
+  await delivery.waitForLoadState();
+  const deliveryTab = await ext.tabIdOf(delivery, { handOver: false });
+  const read = await ext.command('get_accessibility_tree', deliveryTab, { filter: 'all' });
+  assert.equal(read?.success, true, JSON.stringify(read));
+  assert.match(read.data.pageContent, /heading "Delivery"/);
+  ext.send({ type: 'SERVER_RESPONSE', data: { type: 'response', content: 'Done.' } });
   await panel.close();
 });
 
