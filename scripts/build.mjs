@@ -34,7 +34,7 @@
  * (scripts/store-manifest.mjs says why, and what it refuses).
  */
 import { createHash } from 'node:crypto';
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { storeManifest } from './store-manifest.mjs';
@@ -79,14 +79,36 @@ function crc32(buf) {
   return (c ^ -1) >>> 0;
 }
 
-/** Every file under `entry`, as repo-relative POSIX paths, sorted. */
+/*
+ * WHAT IS PACKAGED IS WHAT THE TREE HOLDS, BYTE FOR BYTE (foxl-ai/pilot #7922). The allowlist names paths, so a
+ * symbolic link under one of them would put its TARGET's bytes in the zip and in SHA256SUMS.txt: content from
+ * outside the repository (a build machine's file, or code no diff ever showed) shipped with the extension's
+ * permissions. So the walk uses lstat, never stat, and a symlink, or anything that is neither a file nor a
+ * directory, fails the build by name. The read below refuses a link too (O_NOFOLLOW), in case one appeared
+ * after the walk. git keeps no symlink in this tree, so an honest checkout never meets either refusal.
+ */
 function collect(entry) {
   const abs = join(root, entry);
-  const st = statSync(abs);
+  const st = lstatSync(abs);
+  if (st.isSymbolicLink()) {
+    throw new Error(`${entry} is a symbolic link: the build packages only files the tree itself holds. Replace it with the file, or leave it out.`);
+  }
   if (st.isFile()) return [entry];
+  if (!st.isDirectory()) throw new Error(`${entry} is neither a file nor a directory: the build packages only files.`);
   const out = [];
   for (const name of readdirSync(abs)) out.push(...collect(posix.join(entry, name)));
   return out;
+}
+
+/** A file's bytes, refusing a symbolic link in its place (the walk above checked the directories). */
+function readTreeFile(abs) {
+  const fd = openSync(abs, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    if (!fstatSync(fd).isFile()) throw new Error(`${relative(root, abs)} is not a file`);
+    return readFileSync(fd);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 const files = INCLUDE.flatMap(collect).sort();
@@ -107,7 +129,7 @@ const centrals = [];
 let offset = 0;
 
 for (const name of files) {
-  let data = readFileSync(join(root, name.split(posix.sep).join(sep)));
+  let data = readTreeFile(join(root, name.split(posix.sep).join(sep)));
   // The zip is what the store receives: manifest.json goes in without its `key` (scripts/store-manifest.mjs).
   if (name === 'manifest.json') {
     data = Buffer.from(storeManifest(data.toString('utf8')), 'utf8');
