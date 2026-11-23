@@ -5,7 +5,7 @@ services have their own policy at <https://foxl.ai/privacy>; that distinction
 matters here: the extension hands page data to its configured Foxl server, and the
 desktop app decides what context to send to the model or connected service.
 
-Last updated: November 17, 2026.
+Last updated: November 23, 2026.
 
 ## The short version
 
