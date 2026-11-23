@@ -408,8 +408,8 @@ function onTransportOpen(kind) {
     type: 'extension_connected',
     data: { version: chrome.runtime.getManifest().version, capabilities: CAPABILITIES, transport: kind },
   });
-  // A Stop pressed while no channel was open reaches the desktop now (STOP HOLDS).
-  if (stopLatch?.unsent && transportSend({ type: 'stop_agent' })) stopLatch.unsent = false;
+  // A Stop pressed while no channel was open reaches the desktop now, within its hold only (STOP HOLDS).
+  sendUnsentStop();
   startKeepAlive();
 }
 
@@ -1058,10 +1058,21 @@ const inputQueue = createInputQueue();
  * sent nothing for STOP_QUIET_MS: commands it had already sent before it stopped the run are
  * refused, and after that the rest of the run is the desktop's own stop. A desktop that sends each
  * command's run id is the desktop half of foxl-ai/pilot #7927.
- * A Stop pressed while no channel was open is sent again when one opens.
+ * A Stop pressed while no channel was open is sent when one opens within STOP_HOLD_MS.
+ *
+ * A STOP HOLDS FOR A BOUNDED TIME (foxl-ai/pilot #8210). A run-less hold ends STOP_HOLD_MS after the press even when
+ * the desktop never answered (the channel dropped before its reply), so one lost reply no longer refuses every
+ * command until some later run ends. A Stop pressed while no channel was open is sent only if a channel opens within
+ * STOP_HOLD_MS of the press: sent later, it would stop whatever run the desktop treats as the extension's by then,
+ * which the person did not press it for. A desktop that names its runs keeps the stopped run refused by its id, which
+ * holds nothing else. The latch lives in this worker's memory: Chrome ends an idle extension worker after 30 s
+ * without events (developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle, not measured
+ * here), and the press is one, so the worker that took a Stop normally outlives its hold; one that crashes first
+ * holds for less, never for longer.
  */
 const STOP_QUIET_MS = 1500;
-let stopLatch = null; // { run, answeredAt, lastRefusedAt, unsent }
+const STOP_HOLD_MS = 30_000;
+let stopLatch = null; // { run, pressedAt, answeredAt, lastRefusedAt, unsent }
 let stopCount = 0;
 let lastRun = null;
 
@@ -1072,7 +1083,12 @@ function commandRun(data) {
 
 function holdStoppedRun() {
   stopCount += 1;
-  stopLatch = { run: lastRun, answeredAt: null, lastRefusedAt: Date.now(), unsent: false };
+  stopLatch = { run: lastRun, pressedAt: Date.now(), answeredAt: null, lastRefusedAt: Date.now(), unsent: false };
+}
+
+/** Has the person's Stop outlived its hold (STOP_HOLD_MS from the press)? */
+function stopExpired(now = Date.now()) {
+  return !!stopLatch && now - stopLatch.pressedAt >= STOP_HOLD_MS;
 }
 
 /** Is a command of this run (null: none named) held by the person's Stop? Ends the hold once a new run has begun. */
@@ -1084,12 +1100,23 @@ function heldByStop(run) {
     return false;
   }
   const now = Date.now();
-  if (stopLatch.answeredAt && now - Math.max(stopLatch.answeredAt, stopLatch.lastRefusedAt) >= STOP_QUIET_MS) {
+  if (stopExpired(now) || (stopLatch.answeredAt && now - Math.max(stopLatch.answeredAt, stopLatch.lastRefusedAt) >= STOP_QUIET_MS)) {
     stopLatch = null;
     return false;
   }
   stopLatch.lastRefusedAt = now;
   return true;
+}
+
+/** A channel opened: the person's Stop goes out if it never did and its hold has not ended, else it is dropped. */
+function sendUnsentStop() {
+  if (!stopLatch?.unsent) return;
+  if (stopExpired()) {
+    stopLatch.unsent = false;
+    if (!stopLatch.run) stopLatch = null;
+    return;
+  }
+  if (transportSend({ type: 'stop_agent' })) stopLatch.unsent = false;
 }
 
 function stoppedRefusal(action) {

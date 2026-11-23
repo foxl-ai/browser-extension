@@ -137,7 +137,8 @@ Anything the desktop app retains after receiving this data is covered by
   its configured server, the extension receives no new task commands.
 - **Stop a task.** Pressing **Stop Foxl** on a page tells Foxl Desktop to stop that
   task, and the extension refuses the task's commands still on their way; your next
-  request starts afresh.
+  request starts afresh. If the extension is not connected to Foxl Desktop when you
+  press it, it tells the desktop when it reconnects within 30 seconds, and not after.
 - **Remove it.** Uninstalling from `chrome://extensions` takes its stored
   settings with it.
 

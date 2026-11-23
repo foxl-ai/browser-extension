@@ -15,6 +15,8 @@ version pinned to the app's unified line; the split makes the two independent.
   such as a development server's, open as before.
 - **When Foxl reads a page or takes a screenshot, the border and Stop Foxl show right after it,**
   not before. While Foxl clicks or types they still show for as long as it works.
+- **Stop Foxl pressed while the extension is not connected to Foxl Desktop** reaches the
+  desktop if it reconnects within 30 seconds, and not after.
 
 ### Fixed
 
