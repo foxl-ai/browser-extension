@@ -130,8 +130,8 @@ Anything the desktop app retains after receiving this data is covered by
   name, so a group you name "Foxl" or "Pilot" stays yours. That memory is cleared
   when Chrome restarts or the extension updates: a Foxl group that Chrome brings
   back from before is then yours, and Foxl starts a new group for its next tab. While the agent
-  reads, captures, types into or clicks on a page, a border around the page and a
-  **Stop Foxl** button show on it, whatever the desktop app sends (since 0.14.1);
+  types into or clicks on a page, and right after it reads or captures one, a border around
+  the page and a **Stop Foxl** button show on it, whatever the desktop app sends (since 0.14.1);
   between those steps they stay while the desktop app says a run is under way.
 - **Cut the connection.** Quit the desktop app. With nothing listening on
   its configured server, the extension receives no new task commands.

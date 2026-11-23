@@ -13,6 +13,8 @@ version pinned to the app's unified line; the split makes the two independent.
 - **Foxl does not open Foxl Desktop's own page** (`localhost:13847`, or `3847`) in a tab it
   works in, and does not read or act in one that a site sends there. Other local addresses,
   such as a development server's, open as before.
+- **When Foxl reads a page or takes a screenshot, the border and Stop Foxl show right after it,**
+  not before. While Foxl clicks or types they still show for as long as it works.
 
 ### Fixed
 
