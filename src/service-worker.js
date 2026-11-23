@@ -894,26 +894,210 @@ const OPENER_DEPTH = 5;
  * extension made it (addTabToPilotGroup, joinFoxlGroup), which records its id here, in chrome.storage.session so a
  * restarted worker still knows it. A group the person makes is theirs whatever they name it, "Foxl" or "Pilot"
  * included, and a group an earlier build made in another browser session is not adopted by its name either. Chrome
- * clears session storage when the browser restarts and when the extension updates, so the group from before is then
- * the person's, and Foxl starts a new one for its next tab.
+ * clears session storage when the browser restarts and when the extension updates; the group from before is then
+ * Foxl's again only by its tabs (FOXL'S OWN GROUP AFTER A RESTART OR AN UPDATE, below).
  */
 const FOXL_GROUPS_KEY = 'foxlGroupIds';
 const foxlGroupIds = new Set();
-let foxlGroupsLoaded = null;
+let foxlGroupIdsLoaded = null;
 
-function loadFoxlGroups() {
-  foxlGroupsLoaded ??= chrome.storage.session.get(FOXL_GROUPS_KEY).then((stored) => {
+/** The ids recorded in this browser session, without looking for a group from before. */
+function loadFoxlGroupIds() {
+  foxlGroupIdsLoaded ??= chrome.storage.session.get(FOXL_GROUPS_KEY).then((stored) => {
     for (const id of stored?.[FOXL_GROUPS_KEY] ?? []) if (Number.isSafeInteger(id)) foxlGroupIds.add(id);
   }).catch(() => {});
-  return foxlGroupsLoaded;
+  return foxlGroupIdsLoaded;
 }
 
-/** A group this extension just made. */
+/** The ids recorded in this session, and a group from before re-adopted by its tabs while one may be waiting. */
+async function loadFoxlGroups({ now = false } = {}) {
+  await loadFoxlGroupIds();
+  await adoptRestoredGroups(now);
+}
+
+function saveFoxlGroupIds() {
+  return chrome.storage.session.set({ [FOXL_GROUPS_KEY]: [...foxlGroupIds] }).catch(() => {});
+}
+
+/** A group this extension just made: Foxl starts a new group, so a fingerprint from before is used no more. */
 async function recordFoxlGroup(groupId) {
   if (!Number.isSafeInteger(groupId) || groupId < 0) return;
   await loadFoxlGroups();
   foxlGroupIds.add(groupId);
-  await chrome.storage.session.set({ [FOXL_GROUPS_KEY]: [...foxlGroupIds] }).catch(() => {});
+  await saveFoxlGroupIds();
+  await queuePrints(retireEarlierPrints);
+  groupsChanged();
+}
+
+/*
+ * FOXL'S OWN GROUP AFTER A RESTART OR AN UPDATE (foxl-ai/pilot #8219). Both clear the id record above, and a restart
+ * gives a restored group a new id. So at every change of one of Foxl's groups (a tab joins, leaves, moves, or opens
+ * another address) its FINGERPRINT is written to chrome.storage.local: a SHA-256 of the ordered addresses of its tabs
+ * and a random salt of this profile, never the addresses, the title or the colour. When a browser session begins
+ * without the record (SESSION_MARK_KEY tells a fingerprint from an earlier session), a group is Foxl's again only when
+ * its tabs, in order, give exactly a fingerprint from before, and no other open group gives the same one. A title, a
+ * colour, a name of "Foxl" or "Pilot", or a group made later with other tabs never makes a group Foxl's, and nothing is
+ * written into the title. A fingerprint from before is used once: it goes when its group is re-adopted, when two
+ * groups give it, and when Foxl starts a new group in this session. A group of blank tabs has none. A group the
+ * person closes is forgotten; one that goes with its window (closing it, or quitting Chrome) is kept, which is the
+ * group Chrome restores.
+ */
+const GROUP_PRINTS_KEY = 'foxlGroupPrints';
+const GROUP_PRINT_SALT_KEY = 'foxlGroupPrintSalt';
+const SESSION_MARK_KEY = 'foxlSessionMark';
+const GROUP_PRINTS_MAX = 8;
+const GROUP_PRINT_WAIT_MS = 400;
+const ADOPT_RETRY_MS = 2000;
+let sessionMarkLoaded = null;
+let printSaltLoaded = null;
+let printQueue = Promise.resolve();
+let printTimer = null;
+let earlierPrints = null; // null: not read yet; false: none from an earlier session is left
+let adoptedAt = 0;
+let lastAdoption = Promise.resolve();
+
+const randomHex = (bytes) => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, '0')).join('');
+
+/** Read-modify-writes of the fingerprints, one at a time. */
+function queuePrints(job) {
+  printQueue = printQueue.then(job).catch((err) => console.error('[Foxl] Tab group fingerprint:', err));
+  return printQueue;
+}
+
+/** This browser session's mark (chrome.storage.session, so a restarted worker keeps it); null when it cannot be kept. */
+function sessionMark() {
+  sessionMarkLoaded ??= chrome.storage.session.get(SESSION_MARK_KEY).then(async (stored) => {
+    const mark = stored?.[SESSION_MARK_KEY];
+    if (typeof mark === 'string' && /^[0-9a-f]{32}$/.test(mark)) return mark;
+    const fresh = randomHex(16);
+    await chrome.storage.session.set({ [SESSION_MARK_KEY]: fresh });
+    return fresh;
+  }).catch(() => null);
+  return sessionMarkLoaded;
+}
+
+function printSalt() {
+  printSaltLoaded ??= chrome.storage.local.get(GROUP_PRINT_SALT_KEY).then(async (stored) => {
+    const salt = stored?.[GROUP_PRINT_SALT_KEY];
+    if (typeof salt === 'string' && /^[0-9a-f]{64}$/.test(salt)) return salt;
+    const fresh = randomHex(32);
+    await chrome.storage.local.set({ [GROUP_PRINT_SALT_KEY]: fresh });
+    return fresh;
+  }).catch(() => null);
+  return printSaltLoaded;
+}
+
+/** A group's fingerprint, or null when it has no web page in it. */
+async function groupPrint(groupId, salt) {
+  const tabs = (await chrome.tabs.query({ groupId })).sort((a, b) => a.index - b.index);
+  const urls = tabs.map((t) => t.url || t.pendingUrl || '');
+  if (!urls.some((u) => /^https?:\/\//i.test(u))) return null;
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([salt, urls])));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function readPrints() {
+  const stored = await chrome.storage.local.get(GROUP_PRINTS_KEY).catch(() => ({}));
+  const list = stored?.[GROUP_PRINTS_KEY];
+  return Array.isArray(list)
+    ? list.filter((e) => e && typeof e.mark === 'string' && typeof e.print === 'string' && /^[0-9a-f]{64}$/.test(e.print) && Number.isSafeInteger(e.groupId))
+    : [];
+}
+
+function writePrints(list) {
+  return chrome.storage.local.set({ [GROUP_PRINTS_KEY]: list.slice(-GROUP_PRINTS_MAX) });
+}
+
+/** One of Foxl's groups may have changed: its fingerprint is written once the changes stop. */
+function groupsChanged() {
+  clearTimeout(printTimer);
+  printTimer = setTimeout(() => { printTimer = null; queuePrints(refreshPrints); }, GROUP_PRINT_WAIT_MS);
+}
+
+/** A tab event: when it may touch one of Foxl's groups (`groupId` undefined: any of them), the fingerprints follow. */
+function tabsChanged(groupId) {
+  loadFoxlGroupIds().then(() => {
+    if (foxlGroupIds.size && (groupId === undefined || foxlGroupIds.has(groupId))) groupsChanged();
+  });
+}
+
+async function windowOpen(windowId) {
+  try { await chrome.windows.get(windowId); return true; } catch { return false; }
+}
+
+/** Each of Foxl's groups in this session, written as it is now. */
+async function refreshPrints() {
+  const mark = await sessionMark();
+  const salt = await printSalt();
+  if (!mark || !salt) return;
+  await loadFoxlGroupIds();
+  let list = await readPrints();
+  for (const id of foxlGroupIds) {
+    const mine = list.find((e) => e.mark === mark && e.groupId === id) ?? null;
+    let group = null;
+    try { group = await chrome.tabGroups.get(id); } catch { group = null; }
+    if (!group) {
+      // Closed by the person in a window still open: forgotten. Gone with its window: kept for the group Chrome restores.
+      if (mine && await windowOpen(mine.windowId)) list = list.filter((e) => e !== mine);
+      continue;
+    }
+    const print = await groupPrint(id, salt);
+    list = list.filter((e) => e !== mine);
+    if (print) list.push({ mark, groupId: id, windowId: group.windowId, print, at: Date.now() });
+  }
+  await writePrints(list);
+}
+
+/** Foxl starts a new group in this session: no fingerprint from before is used any more. */
+async function retireEarlierPrints() {
+  const mark = await sessionMark();
+  if (!mark) return;
+  const list = await readPrints();
+  const kept = list.filter((e) => e.mark === mark);
+  if (kept.length !== list.length) await writePrints(kept);
+  earlierPrints = false;
+}
+
+/**
+ * The groups Chrome kept or restored that are Foxl's by their tabs (above). Run when Foxl's groups are first loaded,
+ * again before Foxl would make a new group (`now`), and at most every ADOPT_RETRY_MS otherwise, while a fingerprint
+ * from before is left: Chrome may still be restoring the tabs when the worker starts.
+ */
+function adoptRestoredGroups(now) {
+  if (earlierPrints === false) return Promise.resolve();
+  if (!now && Date.now() - adoptedAt < ADOPT_RETRY_MS) return lastAdoption;
+  adoptedAt = Date.now();
+  lastAdoption = queuePrints(adoptionPass);
+  return lastAdoption;
+}
+
+async function adoptionPass() {
+  const mark = await sessionMark();
+  const salt = await printSalt();
+  if (!mark || !salt) { earlierPrints = false; return; }
+  await loadFoxlGroupIds();
+  let list = await readPrints();
+  const before = list.filter((e) => e.mark !== mark);
+  if (!before.length) { earlierPrints = false; return; }
+  const open = [];
+  for (const group of await chrome.tabGroups.query({}).catch(() => [])) {
+    if (foxlGroupIds.has(group.id)) continue;
+    const print = await groupPrint(group.id, salt).catch(() => null);
+    if (print) open.push({ id: group.id, print });
+  }
+  const adopted = [];
+  for (const print of new Set(before.map((e) => e.print))) {
+    const matches = open.filter((g) => g.print === print);
+    if (matches.length === 0) continue; // not there (yet): kept for the next pass
+    // One group gives it: Foxl's again. Two or more: Foxl cannot tell its own from a copy, and adopts none.
+    if (matches.length === 1) adopted.push(matches[0].id);
+    list = list.filter((e) => e.mark === mark || e.print !== print);
+  }
+  for (const id of adopted) foxlGroupIds.add(id);
+  if (adopted.length) await saveFoxlGroupIds();
+  await writePrints(list);
+  earlierPrints = list.some((e) => e.mark !== mark);
+  if (adopted.length) groupsChanged();
 }
 
 function loadHandedTabs() {
@@ -951,7 +1135,8 @@ async function handTab(tabId) {
 /** Put a tab in a Foxl group of its own window (a new one when there is none): a tab never moves to another window. */
 async function joinFoxlGroup(tab) {
   try {
-    await loadFoxlGroups();
+    // A group from before that Chrome has restored since is looked for first (FOXL'S OWN GROUP AFTER A RESTART).
+    await loadFoxlGroups({ now: true });
     const groups = await chrome.tabGroups.query({ windowId: tab.windowId });
     const here = groups.find((g) => foxlGroupIds.has(g.id));
     if (here) {
@@ -2161,9 +2346,10 @@ async function getOrCreatePilotTabGroup() {
     }
   }
   
-  // One of Foxl's own groups that is still open (FOXL'S OWN GROUPS ARE KNOWN BY ID), never one found by its title.
+  // One of Foxl's own groups that is still open (FOXL'S OWN GROUPS ARE KNOWN BY ID), never one found by its title;
+  // one from before the restart or the update counts once its tabs say so (FOXL'S OWN GROUP AFTER A RESTART).
   try {
-    await loadFoxlGroups();
+    await loadFoxlGroups({ now: true });
     const groups = await chrome.tabGroups.query({});
     const mine = groups.find((g) => foxlGroupIds.has(g.id));
     if (mine) {
@@ -2719,7 +2905,23 @@ chrome.storage.onChanged.addListener((changes, area) => {
   else connectToServer();
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => {
+/*
+ * What changes one of Foxl's groups, for its fingerprint (FOXL'S OWN GROUP AFTER A RESTART OR AN UPDATE): a tab joins or
+ * leaves a group (or is pinned, which takes it out), one of its tabs opens another address, moves, is made in it, is
+ * closed, or goes to another window. A tab that closes with its window (closing it, or quitting Chrome) changes
+ * nothing, so the fingerprint is the group Chrome restores.
+ */
+chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
+  if (change.groupId !== undefined || change.pinned !== undefined) tabsChanged(undefined);
+  else if (change.url !== undefined) tabsChanged(tab?.groupId);
+});
+chrome.tabs.onCreated.addListener((tab) => { if (Number.isSafeInteger(tab?.groupId) && tab.groupId >= 0) tabsChanged(tab.groupId); });
+chrome.tabs.onMoved.addListener(() => tabsChanged(undefined));
+chrome.tabs.onDetached.addListener(() => tabsChanged(undefined));
+chrome.tabs.onAttached.addListener(() => tabsChanged(undefined));
+
+chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
+  if (!removeInfo?.isWindowClosing) tabsChanged(undefined);
   clearPageSnapshots(tabId);
   loadHandedTabs().then(() => { if (handedTabs.delete(tabId)) saveHandedTabs(); });
   loadFilled().then(() => { if (filledPrints.delete(tabId)) saveFilled(); });

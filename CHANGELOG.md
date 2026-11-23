@@ -10,6 +10,9 @@ version pinned to the app's unified line; the split makes the two independent.
 
 ### Changed
 
+- **After Chrome restarts or the extension updates, Foxl keeps working in its tab group from
+  before,** when Chrome brings it back with the tabs Foxl last left in it. A group that only
+  has Foxl's name is still yours, and so is any group you make.
 - **Foxl does not open Foxl Desktop's own page** (`localhost:13847`, or `3847`) in a tab it
   works in, and does not read or act in one that a site sends there. Other local addresses,
   such as a development server's, open as before.
