@@ -1133,12 +1133,14 @@ async function executeBrowserCommand(command) {
   // A navigation to a file downloads from the site it names, so it is remembered with that one.
   if (targetTabId && (INPUT_ACTIONS.has(action) || action === 'navigate')) await noteActed(targetTabId, action === 'navigate' ? params?.url : null);
 
-  // The tab shows that Foxl is acting while this runs (WHILE FOXL ACTS IN A TAB, THAT TAB SAYS SO).
+  // The tab shows that Foxl is acting while this runs, and a read once it is taken (WHILE FOXL ACTS IN A TAB, THAT TAB SAYS SO).
   const overlayTab = OVERLAY_ACTIONS.has(action) && targetTabId != null ? targetTabId : null;
-  if (overlayTab != null) beginActing(overlayTab);
+  const readFirst = overlayTab != null && READ_ACTIONS.has(action);
+  if (overlayTab != null && !readFirst) beginActing(overlayTab);
   try {
     return await dispatchBrowserCommand({ action, targetTabId, params, deadline });
   } finally {
+    if (readFirst) beginActing(overlayTab);
     if (overlayTab != null) endActing(overlayTab);
   }
 }
@@ -2459,8 +2461,15 @@ async function openSidePanel(tabId) {
  * the overlay for clears it OVERLAY_GRACE_MS after it ends, so the next command or the desktop's own show,
  * which follows every command, finds it still up. The screenshot itself still leaves it out (page-capture.js).
  * Messages to the page are not awaited: a page held by a dialog never holds a command here.
+ *
+ * A READ IS TAKEN BEFORE THE OVERLAY GOES UP (foxl-ai/pilot #8211). The page can watch for the overlay's node, and its
+ * MutationObserver runs before a read message sent after the node arrives, so a page could show Foxl something else
+ * at the very moment it reads (instructions only Foxl sees). For a read that changes nothing (READ_ACTIONS) the overlay
+ * is raised once the read has been taken, and goes after the grace like any other; the person still sees that Foxl
+ * read the tab. An action (a click, typing) still raises it first, for as long as it runs.
  */
 const OVERLAY_ACTIONS = new Set(['get_accessibility_tree', 'read_text', 'screenshot', 'click', 'type', 'fill_sign_in', 'click_at', 'press_key', 'hover', 'select', 'navigate', 'scroll']);
+const READ_ACTIONS = new Set(['get_accessibility_tree', 'read_text', 'screenshot']);
 const OVERLAY_GRACE_MS = 800;
 const overlayWanted = new Set(); // tabs the desktop asked to show the overlay on
 const commandsActing = new Map(); // tabId -> commands running on it
