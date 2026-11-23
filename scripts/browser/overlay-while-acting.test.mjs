@@ -2,10 +2,11 @@
  * WHILE FOXL ACTS IN A TAB, THAT TAB SAYS SO (foxl-ai/pilot #7804, part 1).
  *
  * The extension raises the overlay (the glow and the Stop Foxl button) itself for every command that acts in or
- * captures a tab, for as long as it runs, whatever the desktop sent before, and clears it after the command ends when
- * the desktop did not ask for it. The page here records, in its own world, when the overlay's glow is added and
- * removed and when its field gets input. The first two cases are RED on 0.14.0 (main a11298c); the third, the desktop's
- * own show and hide, is the control.
+ * captures a tab, whatever the desktop sent before, and clears it after the command ends when the desktop did not ask
+ * for it: for as long as an action runs, and for a read (a tree, read_text, a screenshot) once the read has been taken,
+ * so a page never learns from it that a read is coming (foxl-ai/pilot #8211, read-before-overlay.test.mjs). The page
+ * here records, in its own world, when the overlay's glow is added and removed and when its field gets input. The
+ * first two cases are RED on 0.14.0 (main a11298c); the third, the desktop's own show and hide, is the control.
  *
  * The real extension in Chromium (scripts/browser/harness.mjs). Run: npm run test:browser.
  * FOXL_EXTENSION_DIR=<a tree> runs it against that build.
@@ -76,7 +77,7 @@ test('typing shows the overlay while it runs, even right after a hide frame, and
   assert.ok(down && down.at >= answeredAt, `the overlay did not stay until the command ended: ${JSON.stringify(events)}`);
 });
 
-test('a screenshot shows it while it runs too, and it clears after', async () => {
+test('a screenshot shows it too, from the capture on, and it clears after', async () => {
   await afterHideFrame();
   const startedAt = Date.now();
   const shot = await ext.command('screenshot', tabId, {});
@@ -85,8 +86,8 @@ test('a screenshot shows it while it runs too, and it clears after', async () =>
   const events = await until(log, (l) => l.some((e) => e.what === 'overlay-'), 5_000);
   const up = events.find((e) => e.what === 'overlay+');
   const down = events.find((e) => e.what === 'overlay-');
-  assert.ok(up && up.at >= startedAt - 50 && up.at <= answeredAt, `the overlay was not up during the capture: ${JSON.stringify(events)}`);
-  assert.ok(down && down.at >= answeredAt, `the overlay did not stay until the capture ended: ${JSON.stringify(events)}`);
+  assert.ok(up && up.at >= startedAt - 50, `the overlay never went up for the capture: ${JSON.stringify(events)}`);
+  assert.ok(down && down.at >= answeredAt && down.at > up.at, `the overlay did not stay until the capture ended: ${JSON.stringify(events)}`);
 });
 
 test('the desktop\'s show keeps the overlay up, and its hide takes it down when nothing runs', async () => {
