@@ -3,12 +3,14 @@
  *
  * `launchExtension()` copies this checkout (or `FOXL_EXTENSION_DIR`, another build: the red run
  * points it at a release's tree) to a temporary directory, loads it unpacked in Chromium
- * (Playwright's, a persistent profile, Chrome's pop-up blocker left ON), and serves on one
- * OS-assigned loopback port both a fictional site and the desktop's side of the protocol: `/api/health`
- * for the extension's discovery, and the `/extension` WebSocket that sends `browser_command`
- * frames and reads `browser_result` ones, as docs/DEVELOPMENT.md documents them.
+ * (Playwright's, a persistent profile, Chrome's pop-up blocker left ON), and serves on two
+ * OS-assigned loopback ports the desktop's side of the protocol (`desktopOrigin`: `/api/health`
+ * for the extension's discovery, the `/extension` WebSocket that sends `browser_command`
+ * frames and reads `browser_result` ones, as docs/DEVELOPMENT.md documents them, and at `/` a page
+ * standing in for the desktop's own app) and a fictional site (`origin`, the `routes`). Two ports,
+ * because a tab Foxl works in never opens the connected desktop's port (foxl-ai/pilot #8212).
  *
- * The one change to the copy: `SERVER_PORTS` in its service worker names that port instead of
+ * The one change to the copy: `SERVER_PORTS` in its service worker names the desktop's port instead of
  * Foxl Desktop's (13847, 3847), so a test never reaches a real desktop running on the same machine
  * (the extension discovers a desktop by probing those ports). The rewrite must match exactly once,
  * or the harness refuses to start.
@@ -42,6 +44,9 @@ import { WebSocketServer } from 'ws';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SKIP = new Set(['node_modules', '.git', 'dist', 'store', 'docs', '.store-research']);
+
+/** What the desktop's own port serves at `/` here, standing in for its app (foxl-ai/pilot server.ts `serveSpa`). */
+export const DESKTOP_APP_PAGE = '<!doctype html><html><head><title>Foxl Desktop</title></head><body><h1>Foxl Desktop app</h1><p id="chats">Recent chats of the person</p><button id="setting">Allow every tool</button></body></html>';
 
 /** The native-messaging host a copy asks for: no Foxl Desktop installs one by this name. */
 export const HARNESS_HOST_NAME = 'ai.foxl.browser_bridge_harness';
@@ -152,6 +157,7 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
   let onHello;
   const helloSeen = new Promise((r) => { onHello = r; });
 
+  // The desktop's side: discovery, the socket below, and its own app's page.
   const server = createServer((req, res) => {
     const path = new URL(req.url, 'http://localhost').pathname;
     if (path === '/api/health') {
@@ -159,11 +165,23 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
       res.end(JSON.stringify({ status: 'ok' }));
       return;
     }
+    if (path === '/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(DESKTOP_APP_PAGE);
+      return;
+    }
+    res.writeHead(404, { 'content-type': 'text/plain' });
+    res.end('not found');
+  });
+  // The fictional site, on a port of its own.
+  const site = createServer((req, res) => {
+    const path = new URL(req.url, 'http://localhost').pathname;
     const route = routes[path];
     if (route) return route(req, res);
     res.writeHead(404, { 'content-type': 'text/plain' });
     res.end('not found');
   });
+  site.on('upgrade', (req, sock) => { sock.destroy(); });
   const sockets = new WebSocketServer({ noServer: true });
   server.on('upgrade', (req, sock, head) => {
     const url = new URL(req.url, 'http://localhost');
@@ -189,8 +207,10 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
     });
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  await new Promise((r) => site.listen(0, '127.0.0.1', r));
   const port = server.address().port;
-  const origin = `http://localhost:${port}`;
+  const desktopOrigin = `http://localhost:${port}`;
+  const origin = `http://localhost:${site.address().port}`;
 
   /*
    * A launch that fails after the server is listening closes it again: a listening loopback server
@@ -232,6 +252,7 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
     await context?.close().catch(() => {});
     sockets.close();
     await new Promise((r) => server.close(r));
+    await new Promise((r) => site.close(r));
     if (extDir) rmSync(extDir, { recursive: true, force: true });
     if (config) rmSync(config, { recursive: true, force: true });
     throw err;
@@ -305,7 +326,9 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
     for (const ws of sockets.clients) ws.terminate();
     sockets.close();
     server.closeAllConnections?.();
+    site.closeAllConnections?.();
     await new Promise((r) => server.close(r));
+    await new Promise((r) => site.close(r));
     rmSync(extDir, { recursive: true, force: true });
     rmSync(config, { recursive: true, force: true });
   };
@@ -324,5 +347,5 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
     for (const ws of sockets.clients) ws.terminate();
     socket = null;
   };
-  return { context, origin, command, send, frames, tabIdOf, personGroup, announced, close, extensionId, sockets: seen, nativeHostMode, removeNativeHost, dropSockets };
+  return { context, origin, desktopOrigin, desktopPort: port, command, send, frames, tabIdOf, personGroup, announced, close, extensionId, sockets: seen, nativeHostMode, removeNativeHost, dropSockets };
 }

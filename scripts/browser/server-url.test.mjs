@@ -51,8 +51,8 @@ test('the options page refuses an address that is not this computer, by name, an
 test('a stored address for another host is ignored: discovery runs, the desktop is reached, and the options page says so', async () => {
   // As an earlier build left it.
   await options.evaluate((url) => chrome.storage.local.set({ serverUrl: url }), ELSEWHERE);
-  const s = await until(status, (v) => v?.wsConnected === true && v?.serverUrl === ext.origin, 20_000);
-  assert.equal(s?.serverUrl, ext.origin, JSON.stringify(s));
+  const s = await until(status, (v) => v?.wsConnected === true && v?.serverUrl === ext.desktopOrigin, 20_000);
+  assert.equal(s?.serverUrl, ext.desktopOrigin, JSON.stringify(s));
   assert.equal(s.wsConnected, true, JSON.stringify(s));
   assert.equal(s.serverUrlIgnored, true, JSON.stringify(s));
   const tabs = await ext.command('get_tabs');
@@ -64,11 +64,11 @@ test('a stored address for another host is ignored: discovery runs, the desktop 
 
 test('a localhost address works as before', async () => {
   await openOptions();
-  await options.locator('#serverUrl').fill(ext.origin);
+  await options.locator('#serverUrl').fill(ext.desktopOrigin);
   await options.locator('#saveButton').click();
-  assert.equal(await until(stored, (v) => v !== null, 5_000), ext.origin);
-  const s = await until(status, (v) => v?.wsConnected === true && v?.serverUrl === ext.origin, 20_000);
-  assert.equal(s?.serverUrl, ext.origin, JSON.stringify(s));
+  assert.equal(await until(stored, (v) => v !== null, 5_000), ext.desktopOrigin);
+  const s = await until(status, (v) => v?.wsConnected === true && v?.serverUrl === ext.desktopOrigin, 20_000);
+  assert.equal(s?.serverUrl, ext.desktopOrigin, JSON.stringify(s));
   assert.notEqual(s.serverUrlIgnored, true);
   const tabs = await ext.command('get_tabs');
   assert.ok(Array.isArray(tabs?.tabs), JSON.stringify(tabs));
