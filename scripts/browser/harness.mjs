@@ -279,8 +279,46 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
   };
 
   /** The extension's own service worker, for what a person does in Chrome's own UI. */
-  const extensionWorker = async () => context.serviceWorkers().find((w) => w.url().startsWith(`chrome-extension://${extensionId}/`))
-    ?? context.waitForEvent('serviceworker', { predicate: (w) => w.url().startsWith(`chrome-extension://${extensionId}/`), timeout: 10_000 });
+  const ownWorker = (w) => w.url().startsWith(`chrome-extension://${extensionId}/`);
+  const extensionWorker = async () => context.serviceWorkers().filter(ownWorker).at(-1)
+    ?? context.waitForEvent('serviceworker', { predicate: ownWorker, timeout: 10_000 });
+
+  /**
+   * WHAT AN UPDATE OF THE EXTENSION DOES TO FOXL'S OWN STATE, played without reloading it: chrome.storage.session is
+   * cleared and the worker is stopped, so the next event starts it with nothing in memory, while the browser's tabs and
+   * tab groups stay with their ids. chrome.runtime.reload() is not playable here: it unloads the copy, whose pages then
+   * answer ERR_BLOCKED_BY_CLIENT (measured, Playwright 1.64.1's Chromium on Ubuntu 24.04). The worker is stopped with
+   * CDP Target.closeTarget on its service-worker target, from a page's session; the target is then gone, the next
+   * event starts the worker with an empty global scope (measured the same way). Unlike a real update, content scripts
+   * already in a page stay connected. Resolves once the extension has connected to this desktop again: its options
+   * page asks, as a person's would.
+   */
+  const simulateUpdate = async () => {
+    const hellos = frames.filter((f) => f.type === 'extension_connected').length;
+    const worker = await extensionWorker();
+    const page = await context.newPage();
+    const cdp = await context.newCDPSession(page);
+    const swTarget = async () => (await cdp.send('Target.getTargets')).targetInfos
+      .find((t) => t.type === 'service_worker' && t.url.startsWith(`chrome-extension://${extensionId}/`));
+    try {
+      const target = await swTarget();
+      if (!target) throw new Error('no service-worker target for the extension');
+      await worker.evaluate(() => chrome.storage.session.clear());
+      await cdp.send('Target.closeTarget', { targetId: target.targetId });
+      for (const end = Date.now() + 5_000; await swTarget() && Date.now() < end;) await new Promise((r) => setTimeout(r, 100));
+      if (await swTarget()) throw new Error('the extension\'s worker did not stop');
+      await page.goto(`chrome-extension://${extensionId}/options.html`);
+      for (const end = Date.now() + 45_000; frames.filter((f) => f.type === 'extension_connected').length <= hellos && Date.now() < end;) {
+        await page.evaluate(() => chrome.runtime.sendMessage({ type: 'CONNECT_TO_SERVER' })).catch(() => {});
+        await new Promise((r) => setTimeout(r, 1_000));
+      }
+    } finally {
+      await cdp.detach().catch(() => {});
+      await page.close().catch(() => {});
+    }
+    if (frames.filter((f) => f.type === 'extension_connected').length <= hellos) throw new Error('the extension never connected again after the simulated update');
+    return extensionWorker();
+  };
 
   /**
    * The extension's tab id for a Playwright page (matched by URL, asked of Chrome as the person's own browser knows it:
@@ -354,5 +392,5 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
     socketsHeld = true;
     return () => { socketsHeld = false; };
   };
-  return { context, origin, desktopOrigin, desktopPort: port, command, send, frames, tabIdOf, personGroup, announced, close, extensionId, sockets: seen, nativeHostMode, removeNativeHost, dropSockets, holdSockets };
+  return { context, origin, desktopOrigin, desktopPort: port, command, send, frames, tabIdOf, personGroup, announced, close, extensionId, sockets: seen, nativeHostMode, removeNativeHost, dropSockets, holdSockets, simulateUpdate, extensionWorker };
 }
