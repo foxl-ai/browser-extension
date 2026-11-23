@@ -144,6 +144,7 @@ function installHarnessHost({ profile, config, id, url, mode }) {
  * no channel. With a bridge installed, `nativeHostMode(mode)` changes what the NEXT bridge Chrome starts does,
  * `removeNativeHost()` deletes its manifest (Chrome then answers "Specified native messaging host not found."), and
  * `dropSockets()` closes every live `/extension` socket, as a desktop that quits does (a bridge exits with its socket).
+ * `holdSockets()` refuses every new `/extension` socket until the function it returns is called, as no desktop running.
  */
 export async function launchExtension({ routes = {}, grant = [], refuseSocket = null, nativeHost = null, expectHello = !(refuseSocket && nativeHost !== 'relay') } = {}) {
   let socket = null;
@@ -183,9 +184,10 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
   });
   site.on('upgrade', (req, sock) => { sock.destroy(); });
   const sockets = new WebSocketServer({ noServer: true });
+  let socketsHeld = false;
   server.on('upgrade', (req, sock, head) => {
     const url = new URL(req.url, 'http://localhost');
-    if (url.pathname !== '/extension') { sock.destroy(); return; }
+    if (url.pathname !== '/extension' || socketsHeld) { sock.destroy(); return; }
     sockets.handleUpgrade(req, sock, head, (ws) => {
       const paired = url.searchParams.get('pairing') === pairing;
       const entry = { paired, caller: url.searchParams.get('caller'), refused: false };
@@ -347,5 +349,10 @@ export async function launchExtension({ routes = {}, grant = [], refuseSocket = 
     for (const ws of sockets.clients) ws.terminate();
     socket = null;
   };
-  return { context, origin, desktopOrigin, desktopPort: port, command, send, frames, tabIdOf, personGroup, announced, close, extensionId, sockets: seen, nativeHostMode, removeNativeHost, dropSockets };
+  /** Until the returned function is called, the desktop takes no new /extension socket (a desktop that is not running). */
+  const holdSockets = () => {
+    socketsHeld = true;
+    return () => { socketsHeld = false; };
+  };
+  return { context, origin, desktopOrigin, desktopPort: port, command, send, frames, tabIdOf, personGroup, announced, close, extensionId, sockets: seen, nativeHostMode, removeNativeHost, dropSockets, holdSockets };
 }
