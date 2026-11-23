@@ -6,6 +6,18 @@ This extension has its own version line, independent of the Foxl Desktop release
 number. It used to ship inside the Foxl monorepo, where a script kept its manifest
 version pinned to the app's unified line; the split makes the two independent.
 
+## Unreleased
+
+### Changed
+
+- **Foxl does not open Foxl Desktop's own page** (`localhost:13847`, or `3847`) in a tab it
+  works in, and does not read or act in one that a site sends there. Other local addresses,
+  such as a development server's, open as before.
+
+### Fixed
+
+- Security fixes. Update to get them.
+
 ## v0.14.1 - November 20, 2026
 
 ### Changed

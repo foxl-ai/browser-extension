@@ -175,6 +175,8 @@ A command acts only in a tab that is Foxl's: one Foxl opened (`new_tab`, or a `n
 
 `navigate` and `new_tab` open an `http://` or `https://` page, or `about:blank` (a `new_tab` with no url). Any other address (`file:`, `data:`, `blob:`, `view-source:`, a browser page, a relative or scheme-less one) is answered `{ success: false, nothingWasDone: true, error }` before a tab is created or changed.
 
+**Never Foxl Desktop's own address** (foxl-ai/pilot #8212, `src/desktop-origin.js`). An address on this computer (`localhost` or a `*.localhost` name, 127.0.0.0/8, `[::1]`, `0.0.0.0`, `[::]`, and those IPv4 addresses written as IPv6) on Foxl Desktop's ports (13847, 3847, the port of the desktop the local socket reached, and a saved server address's) is answered `{ success: false, nothingWasDone: true, desktopOrigin: true, error }` by `navigate` and `new_tab` before a tab is created or changed. A Foxl tab that a page sends there (a redirect, a link) is answered the same way, with its `tabId`, for every command but `navigate` and `close_tab`, and a step that leads there answers `step.page: null` with `step.desktopOrigin: true`. Desktops up to v0.7.27 put their connection key into that page. Any other local port (a dev server) opens as before.
+
 ## Audit and build
 
 With Node.js 20 or newer:
