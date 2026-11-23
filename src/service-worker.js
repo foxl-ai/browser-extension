@@ -12,6 +12,7 @@ import { createInputQueue } from './input-queue.js';
 import { captureTabScreenshot, readAllowedPage } from './page-capture.js';
 import { getPageSnapshot, clearPageSnapshots } from './page-snapshot.js';
 import { loopbackServerUrl } from './server-url.js';
+import { isDesktopAddress, portOf } from './desktop-origin.js';
 // globalThis.__foxlFilledPrint, the page reader's own fingerprint (WHAT A SAVED SIGN-IN TYPED, below).
 import './content-scripts/filled-print.js';
 
@@ -120,6 +121,7 @@ let reconnectTimer = null;
 let pendingRequests = new Map(); // requestId -> { resolve, reject, timeout }
 let pilotTabGroupId = null; // Pilot's dedicated tab group
 let discoveredServerUrl = null; // Cached auto-discovered URL
+let socketServerUrl = null; // The address the open local socket reached (DESKTOP'S OWN ADDRESS)
 
 // Multi-tab context: tracks all tabs the agent is working with
 // { tabId -> { label?: string, createdAt: number } }
@@ -617,6 +619,7 @@ async function openWebSocketTransport() {
       serverSocket.onopen = () => {
         // Cache the working server URL for faster reconnects
         getServerUrl().then(url => { discoveredServerUrl = url; });
+        socketServerUrl = serverUrl;
         onTransportOpen('websocket');
         resolve(true);
       };
@@ -1119,6 +1122,13 @@ async function executeBrowserCommand(command) {
   if (action === 'navigate' || action === 'new_tab') {
     const to = navigableUrl(params?.url, { required: action === 'navigate' });
     if (!to.ok) return to.refusal;
+    // Never Foxl Desktop's own address (DESKTOP'S OWN ADDRESS, below).
+    if (to.url && isDesktopAddress(to.url, await desktopPorts())) return onDesktopAddress(to.url);
+  }
+  // A Foxl tab a page sent to the desktop's address is not read or acted in; it may still be sent elsewhere or closed.
+  if (targetTabId != null && !TABLESS_ACTIONS.has(action) && action !== 'navigate' && action !== 'close_tab') {
+    const at = await tabOnDesktopAddress(targetTabId);
+    if (at) return onDesktopAddress(at, targetTabId);
   }
   // A navigation to a file downloads from the site it names, so it is remembered with that one.
   if (targetTabId && (INPUT_ACTIONS.has(action) || action === 'navigate')) await noteActed(targetTabId, action === 'navigate' ? params?.url : null);
@@ -1148,7 +1158,7 @@ async function dispatchBrowserCommand({ action, targetTabId, params, deadline })
         // Its answer stays the failure it was.
         if (!result || result.success === false) await endStep(targetTabId, watched).catch(() => null);
       }
-      const step = result && result.success !== false ? await finishStep(targetTabId, watched) : null;
+      const step = result && result.success !== false ? await withoutDesktopPage(targetTabId, await finishStep(targetTabId, watched)) : null;
       const out = step && step.settled !== 'nothing' ? { ...result, step } : { ...result };
       // A form a stopped step of this chat sent here: held this time, and reported for the desktop to record.
       if (watched.leftover) out.leftover = watched.leftover;
@@ -1773,6 +1783,51 @@ function navigableUrl(url, { required }) {
   return refuse(`Foxl opens only http:// and https:// pages (or about:blank), not ${parsed.protocol} addresses; nothing was opened.`);
 }
 
+/*
+ * DESKTOP'S OWN ADDRESS (foxl-ai/pilot #8212, src/desktop-origin.js). A tab Foxl works in never opens Foxl Desktop's own
+ * server: a desktop up to v0.7.27 handed its connection key to the page any `GET /` there loaded, and on every desktop
+ * that page is the person's own Foxl. `navigate` and `new_tab` refuse an address on this computer on the desktop's
+ * ports by name, before a tab is created or changed; a Foxl tab that a page sends there (a redirect, a link) is not
+ * read or acted in, only sent elsewhere or closed; and a click's answer does not carry the page it led to there
+ * (withoutDesktopPage). The ports: 13847 and 3847 whatever SERVER_PORTS says (the test harness points SERVER_PORTS at
+ * its own desktop), the desktop this extension reached over the local socket, and an address the person saved. The
+ * bridge does not say which port its desktop serves on, so a desktop moved to another port and reached only through
+ * the bridge is not known here. Any other local port (a dev server) is a page like any other.
+ */
+const DESKTOP_PORTS = [13847, 3847];
+
+async function desktopPorts() {
+  const ports = new Set([...DESKTOP_PORTS, ...SERVER_PORTS]);
+  const stored = await chrome.storage.local.get(['serverUrl']).catch(() => ({}));
+  for (const url of [socketServerUrl, discoveredServerUrl, loopbackServerUrl(stored?.serverUrl)]) {
+    const port = portOf(url);
+    if (port !== null) ports.add(port);
+  }
+  return ports;
+}
+
+/** The desktop's address this tab is on or loading, or null. */
+async function tabOnDesktopAddress(tabId) {
+  let tab;
+  try { tab = await chrome.tabs.get(tabId); } catch { return null; }
+  const ports = await desktopPorts();
+  return [tab.url, tab.pendingUrl].find((url) => isDesktopAddress(url, ports)) ?? null;
+}
+
+function onDesktopAddress(url, tabId = null) {
+  let where = url;
+  try { where = new URL(url).origin; } catch { /* named as given */ }
+  return {
+    success: false,
+    nothingWasDone: true,
+    desktopOrigin: true,
+    ...(tabId != null ? { tabId } : {}),
+    error: tabId != null
+      ? `Tab ${tabId} is on ${where}, Foxl Desktop's own address on this computer, so nothing was done there. Foxl does not read or act in Foxl Desktop's own app. Navigate the tab to another page or close it.`
+      : `${where} is Foxl Desktop's own address on this computer, so nothing was opened. Foxl does not open Foxl Desktop's own app in a tab it works in. A site on another local port opens as before.`,
+  };
+}
+
 /**
  * Navigate tab to URL
  * IMPORTANT: Only navigates Pilot's working tab, not user's current tab
@@ -2033,6 +2088,12 @@ async function endStep(tabId, armed) {
   if (look && look !== LATE && look.success && look.phase === 'submitting') {
     await askTopFrame(tabId, { type: 'STEP_SETTLE', origin: armed.origin, chat: armed.chat }, STEP_SETTLE_ANSWER_MS);
   }
+}
+
+/** A step that led to Foxl Desktop's own address does not carry that page (DESKTOP'S OWN ADDRESS). */
+async function withoutDesktopPage(tabId, step) {
+  if (!step?.page || !(await tabOnDesktopAddress(tabId))) return step;
+  return { ...step, page: null, desktopOrigin: true };
 }
 
 /** What the step sent, or null when the page could not say (the step's own answer then stands). */
