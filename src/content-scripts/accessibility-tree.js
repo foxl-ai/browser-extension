@@ -117,6 +117,91 @@
     return roleMap[tagName] || 'generic';
   }
 
+  /*
+   * NAMING TEXT (foxl-ai/pilot #7394). Through 0.14.2 a field was named by its aria-label, placeholder, title, alt or a
+   * `for=` label found by its id, and by nothing else, so `<label>Full name <input></label>` (the most common way a form
+   * is written) and a field named by `aria-labelledby` (a design system's form row, a column header) read as a bare
+   * `textbox`. Both are read now, in the order Chrome names a field in (its own accessibility tree, compared field by
+   * field in scripts/browser/accessible-names.test.mjs): `aria-labelledby` first, each id in order (in the element's
+   * own tree first, a shadow root inside a web component, then the document), then `aria-label` as before, then the
+   * element's labels (the ones `element.labels` lists: a wrapping label and a `for=` one, in its own tree,
+   * `labelsText`), then placeholder, title and alt as before. Text that is only whitespace names nothing, and the next
+   * source is read. A select keeps its chosen option first, as before. So a field 0.14.2 named by its aria-label keeps
+   * that name.
+   *
+   * The text is the referenced element's text, as a `for=` label's always was, with parts left out: the element being
+   * named (the field inside its own label), and the contents of a select, a textarea, a datalist, a script, a style, a
+   * template or a noscript. So a label's text never carries a field's value (a textarea's text is its value) and a
+   * password field is never named by what is typed in it. The line clips the name at NAME_CHARS like any other.
+   */
+  const NOT_NAMING_TEXT = new Set(['select', 'textarea', 'datalist', 'script', 'style', 'template', 'noscript']);
+  const NOT_NAMING_SELECTOR = [...NOT_NAMING_TEXT].join(',');
+  function namingText(node, named) {
+    if (node.nodeType === Node.TEXT_NODE) return node.data;
+    if (node.nodeType !== Node.ELEMENT_NODE || NOT_NAMING_TEXT.has(node.localName)) return '';
+    // The usual label holds nothing to leave out: read it whole, natively.
+    if ((node === named || !node.contains(named)) && !node.querySelector(NOT_NAMING_SELECTOR)) return node.textContent || '';
+    let text = '';
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) => n.nodeType === Node.TEXT_NODE ? NodeFilter.FILTER_ACCEPT
+        : (n === named || NOT_NAMING_TEXT.has(n.localName)) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP,
+    });
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) text += n.data;
+    return text;
+  }
+
+  /** The text of the elements `aria-labelledby` names, in its order, joined by spaces; '' when that is blank. */
+  function labelledByText(element) {
+    const ids = (element.getAttribute('aria-labelledby') || '').trim().split(/\s+/).filter(Boolean);
+    if (!ids.length) return '';
+    const root = element.getRootNode ? element.getRootNode() : document;
+    const parts = [];
+    for (const id of ids) {
+      const ref = (root !== document && typeof root.getElementById === 'function' && root.getElementById(id)) || document.getElementById(id);
+      if (ref) parts.push(namingText(ref, element));
+    }
+    return parts.join(' ').trim();
+  }
+
+  /*
+   * The element's labels, the ones `element.labels` lists, found without it: that list is searched over the whole tree
+   * for every field, so on a page with 22,000 fields and 62,000 elements it took 8.3 s, against 0.4 s for an ancestor
+   * walk and a `for=` query per field (measured in Playwright's Chromium 156). A label labels the element it wraps or
+   * names in `for=` exactly when its `control` is that element, the test the list itself makes. The `for=` labels of
+   * each tree are found once per read (`forLabelIndex`, made and dropped by `__generateAccessibilityTree`; a read runs
+   * to its end with no page code in between), not once per element with an id as before.
+   */
+  const LABELABLE = new Set(['button', 'input', 'meter', 'output', 'progress', 'select', 'textarea']);
+  let forLabelIndex = null;
+  /** The `label[for=<id>]` elements of the element's own tree, in tree order. */
+  function forLabelsOf(element) {
+    if (!element.id) return [];
+    const root = element.getRootNode && element.getRootNode().querySelectorAll ? element.getRootNode() : document;
+    if (!forLabelIndex) return [...root.querySelectorAll(`label[for="${CSS.escape(element.id)}"]`)];
+    let byId = forLabelIndex.get(root);
+    if (!byId) {
+      byId = new Map();
+      for (const label of root.querySelectorAll('label[for]')) {
+        const id = label.getAttribute('for');
+        if (!byId.has(id)) byId.set(id, []);
+        byId.get(id).push(label);
+      }
+      forLabelIndex.set(root, byId);
+    }
+    return byId.get(element.id) || [];
+  }
+  /** The text of the element's labels (a wrapping one, a `for=` one), in tree order, joined by spaces. */
+  function labelsText(element, forLabels) {
+    if (!LABELABLE.has(element.localName) || (element.localName === 'input' && element.type === 'hidden')) return '';
+    const labels = forLabels.filter((label) => label.control === element);
+    for (let label = element.parentElement?.closest('label'); label; label = label.parentElement?.closest('label')) {
+      if (label.control === element && !labels.includes(label)) labels.push(label);
+    }
+    if (!labels.length) return '';
+    labels.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+    return labels.map((label) => namingText(label, element)).join(' ').trim();
+  }
+
   /**
    * Get accessible name/label for an element
    */
@@ -132,9 +217,17 @@
       }
     }
 
+    // The field's name in Chrome's order (foxl-ai/pilot #7394, NAMING TEXT): aria-labelledby, aria-label, its labels.
+    const labelledBy = labelledByText(element);
+    if (labelledBy) return labelledBy;
+
     // Check aria-label
     const ariaLabel = element.getAttribute('aria-label');
     if (ariaLabel?.trim()) return ariaLabel.trim();
+
+    const forLabels = forLabelsOf(element);
+    const labelText = labelsText(element, forLabels);
+    if (labelText) return labelText;
 
     // Check placeholder
     const placeholder = element.getAttribute('placeholder');
@@ -149,13 +242,12 @@
     if (alt?.trim()) return alt.trim();
 
     // Check associated label (in the element's own tree, which is a shadow root inside a
-    // web component)
-    if (element.id) {
-      const root = element.getRootNode && element.getRootNode().querySelector ? element.getRootNode() : document;
-      const label = root.querySelector(`label[for="${CSS.escape(element.id)}"]`);
-      if (label?.textContent?.trim()) {
-        return label.textContent.trim();
-      }
+    // web component). `labelsText` above reads the labels Chrome ties to the element; this one is kept, as before, for
+    // a page that gives two elements one id (Chrome ties a `for=` label to the first of them only) and for an element
+    // no label can label.
+    if (forLabels.length) {
+      const text = namingText(forLabels[0], element).trim();
+      if (text) return text;
     }
 
     // Handle input values
@@ -544,7 +636,13 @@
    * @returns {Object} { pageContent, viewport, error? }
    */
   window.__generateAccessibilityTree = function(filter, depth, maxChars, refId, filled) {
-    return withFilled(filled, () => generateTree(filter, depth, maxChars, refId));
+    const before = forLabelIndex;
+    forLabelIndex = new WeakMap();
+    try {
+      return withFilled(filled, () => generateTree(filter, depth, maxChars, refId));
+    } finally {
+      forLabelIndex = before;
+    }
   };
 
   function generateTree(filter, depth, maxChars, refId) {

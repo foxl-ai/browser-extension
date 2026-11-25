@@ -114,7 +114,8 @@ async function filledForm() {
   const tabId = await ext.tabIdOf(page);
   const tree = await ext.command('get_accessibility_tree', tabId, { filter: 'interactive' });
   const text = tree.data.pageContent;
-  const box = await ext.command('click', tabId, { refId: refOf(lineOf(text, 'checkbox "L1"')) });
+  // Named "L1" (its value) through 0.14.2, by its label after (foxl-ai/pilot #7394).
+  const box = await ext.command('click', tabId, { refId: refOf(lineOf(text, 'checkbox "L1')) });
   assert.equal(box.success, true, JSON.stringify(box));
   assert.equal(box.step, undefined, `ticking a box changes nothing a step waits for, and its answer is as before: ${JSON.stringify(box)}`);
   await ext.command('type', tabId, { refId: refOf(lineOf(text, 'Amount you are disputing')), text: '109.22' });
